@@ -24,38 +24,50 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
   void _onQRViewCreated(QRViewController controller) {
     this.controller = controller;
-    controller.scannedDataStream.listen((scanData) {
+    controller.scannedDataStream.listen((scanData) async {
       if (!isProcessing) {
+        isProcessing = true; // Okamžitě nastavíme isProcessing na true
+        await controller.pauseCamera(); // Pozastavíme skener
         setState(() {
           scannedCode = scanData.code;
         });
-        _checkBarcode(scannedCode!);
+        await _checkBarcode(scannedCode!);
+        // Skener znovu spustíme po dokončení akce v dialozích
       }
     });
   }
 
+  // Funkce pro obnovení stavu skeneru po dokončení akce
+  Future<void> _resetScanner() async {
+    setState(() {
+      scannedCode = null;
+      barcodeStatus = null;
+    });
+    await controller?.resumeCamera(); // Obnovíme skener
+    isProcessing = false; // Připravíme na další sken
+  }
+
   // Funkce pro ověření, zda je čárový kód přiřazen
   Future<void> _checkBarcode(String scannedBarcode) async {
-    setState(() {
-      isProcessing = true;
-    });
-
     final response = await ApiService.checkBarcode(scannedBarcode);
     print('Odpověď API (kontrola čárového kódu): $response');
 
-    setState(() {
-      isProcessing = false;
-      if (response['exists'] == true) {
+    if (response['exists'] == true) {
+      setState(() {
         barcodeStatus =
             'Čárový kód je přiřazen k náboji ${response['cartridge']['name']}';
-        // Nabídka navýšení skladové zásoby
-        _showIncreaseStockDialog(scannedBarcode, response['cartridge']['name']);
-      } else {
+      });
+      // Nabídka navýšení skladové zásoby
+      await _showIncreaseStockDialog(
+          scannedBarcode, response['cartridge']['name']);
+    } else {
+      setState(() {
         barcodeStatus = 'Čárový kód není přiřazen.';
-        // Nabídka přiřazení čárového kódu
-        _showAssignBarcodeDialog(scannedBarcode);
-      }
-    });
+      });
+      // Nabídka přiřazení čárového kódu
+      await _showAssignBarcodeDialog(scannedBarcode);
+    }
+    // Nyní _resetScanner() voláme až po dokončení akce v dialozích
   }
 
   // Funkce pro zobrazení dialogu k navýšení skladové zásoby
@@ -66,7 +78,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
     await showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
+        // Uložíme dialogContext
         return AlertDialog(
           title: Text('Navýšení skladové zásoby pro $cartridgeName'),
           content: TextField(
@@ -76,22 +89,33 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
           ),
           actions: <Widget>[
             TextButton(
-              onPressed: () {
+              onPressed: () async {
                 quantity = int.tryParse(quantityController.text) ?? 0;
+                Navigator.pop(dialogContext); // Zavřít dialog
                 if (quantity > 0) {
-                  ApiService.increaseStockByBarcode(scannedBarcode, quantity);
-                  Navigator.pop(context);
-                  _showMessage(
-                      'Skladová zásoba byla navýšena o $quantity kusů.');
-                } else {
-                  Navigator.pop(context);
+                  try {
+                    // Navýšení skladové zásoby přes API
+                    await ApiService.increaseStockByBarcode(
+                        scannedBarcode, quantity);
+
+                    // Zobrazení zprávy o úspěšném navýšení skladové zásoby
+                    _showMessage(
+                        'Skladová zásoba byla navýšena o $quantity kusů.');
+                  } catch (e) {
+                    // Zobrazit chybovou zprávu, pokud navýšení selže
+                    _showMessage('Chyba při navýšení skladové zásoby.');
+                  }
                 }
+                // Resetujeme skener po dokončení akce
+                await _resetScanner();
               },
               child: const Text('OK'),
             ),
             TextButton(
-              onPressed: () {
-                Navigator.pop(context);
+              onPressed: () async {
+                Navigator.pop(dialogContext); // Zavřít dialog bez akce
+                // Resetujeme skener po zavření dialogu
+                await _resetScanner();
               },
               child: const Text('Zrušit'),
             ),
@@ -108,12 +132,15 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
     if (cartridgesResponse.isEmpty) {
       _showMessage('Nemáte žádné tovární náboje k přiřazení.');
+      // Resetujeme skener, protože není žádná akce k provedení
+      await _resetScanner();
       return;
     }
 
-    showDialog(
+    await showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
+        // Uložíme dialogContext
         return AlertDialog(
           title: const Text('Přiřadit čárový kód'),
           content: SingleChildScrollView(
@@ -123,13 +150,35 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                 ...cartridgesResponse.map<Widget>((cartridge) {
                   return ListTile(
                     title: Text(cartridge['name']),
-                    subtitle: Text('Kalibr: ${cartridge['caliber']['name']}'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                            'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}'),
+                        Text('Kalibr: ${cartridge['caliber']['name']}'),
+                        Text(
+                            'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}'),
+                        Text('Cena za kus: ${cartridge['price']} Kč'),
+                        Text(
+                            'Skladová zásoba: ${cartridge['stock_quantity']} ks'),
+                      ],
+                    ),
                     onTap: () async {
                       await ApiService.assignBarcode(
                           cartridge['id'], scannedBarcode);
-                      Navigator.pop(context); // Zavřít dialog po přiřazení
+                      Navigator.pop(dialogContext); // Zavřít dialog
+
+                      // Zobrazení detailů náboje při potvrzení
                       _showMessage(
-                          'Čárový kód byl přiřazen k náboji ${cartridge['name']}.');
+                          'Čárový kód byl přiřazen k náboji: ${cartridge['name']}\n'
+                          'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}\n'
+                          'Kalibr: ${cartridge['caliber']['name']}\n'
+                          'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}\n'
+                          'Cena za kus: ${cartridge['price']} Kč\n'
+                          'Skladová zásoba: ${cartridge['stock_quantity']} ks');
+
+                      // Resetujeme skener po dokončení akce
+                      await _resetScanner();
                     },
                   );
                 }).toList(),
@@ -138,8 +187,10 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
           ),
           actions: <Widget>[
             TextButton(
-              onPressed: () {
-                Navigator.pop(context);
+              onPressed: () async {
+                Navigator.pop(dialogContext); // Zavřít dialog bez akce
+                // Resetujeme skener po zavření dialogu
+                await _resetScanner();
               },
               child: const Text('Zrušit'),
             ),
