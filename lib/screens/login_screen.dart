@@ -22,24 +22,29 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
+      // Zavoláme login funkci z ApiService a dostaneme zpět Map s výsledkem
       final result = await ApiService.login(
         _usernameController.text,
         _passwordController.text,
       );
 
-      if (result['status'] == 'success') {
+      // Zkontrolujeme, zda odpověď obsahuje token
+      if (result.containsKey('token')) {
+        // Přesměrování při úspěšném přihlášení
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => DashboardScreen(username: _usernameController.text),
+            builder: (context) =>
+                DashboardScreen(username: _usernameController.text),
           ),
         );
       } else {
         setState(() {
-          _errorMessage = result['message'];
+          _errorMessage = result['message'] ?? 'Login failed.';
         });
       }
     } catch (error) {
+      // Zachycení případné chyby a nastavení obecné chybové zprávy
       setState(() {
         _errorMessage = 'An error occurred. Please try again.';
       });
@@ -74,7 +79,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(fontSize: 16, color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 32), // Větší mezera mezi nadpisem a přihlašovacími poli
+                const SizedBox(
+                    height:
+                        32), // Větší mezera mezi nadpisem a přihlašovacími poli
                 TextField(
                   controller: _usernameController,
                   decoration: InputDecoration(
