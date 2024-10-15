@@ -57,9 +57,16 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
         barcodeStatus =
             'Čárový kód je přiřazen k náboji ${response['cartridge']['name']}';
       });
-      // Nabídka navýšení skladové zásoby
+      // Zkontrolujeme, zda existuje 'caliber'
+      String caliberName = response['cartridge']['caliber'] != null
+          ? response['cartridge']['caliber']['name']
+          : 'Neznámý kalibr';
+
       await _showIncreaseStockDialog(
-          scannedBarcode, response['cartridge']['name']);
+          scannedBarcode,
+          response['cartridge']['name'],
+          response['cartridge']['manufacturer'] ?? 'Neznámý výrobce',
+          caliberName);
     } else {
       setState(() {
         barcodeStatus = 'Čárový kód není přiřazen.';
@@ -67,21 +74,20 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
       // Nabídka přiřazení čárového kódu
       await _showAssignBarcodeDialog(scannedBarcode);
     }
-    // Nyní _resetScanner() voláme až po dokončení akce v dialozích
   }
 
   // Funkce pro zobrazení dialogu k navýšení skladové zásoby
-  Future<void> _showIncreaseStockDialog(
-      String scannedBarcode, String cartridgeName) async {
+  Future<void> _showIncreaseStockDialog(String scannedBarcode,
+      String cartridgeName, String manufacturerName, String caliber) async {
     int quantity = 0;
     final TextEditingController quantityController = TextEditingController();
 
     await showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
-        // Uložíme dialogContext
         return AlertDialog(
-          title: Text('Navýšení skladové zásoby pro $cartridgeName'),
+          title: Text(
+              'Navýšení skladové zásoby pro $cartridgeName (Výrobce: $manufacturerName, Kalibr: $caliber)'),
           content: TextField(
             controller: quantityController,
             keyboardType: TextInputType.number,
