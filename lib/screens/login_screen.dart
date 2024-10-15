@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:simple_login_app/services/api_service.dart';
 import 'package:simple_login_app/screens/dashboard_screen.dart'; // Správný import pro DashboardScreen
+import 'package:shared_preferences/shared_preferences.dart'; // Import pro shared_preferences
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,6 +15,27 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  bool _rememberMe = false; // Pro uložení stavu checkboxu
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials(); // Načteme uložené přihlašovací údaje
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? savedUsername = prefs.getString('username');
+    String? savedPassword = prefs.getString('password');
+
+    if (savedUsername != null && savedPassword != null) {
+      setState(() {
+        _usernameController.text = savedUsername;
+        _passwordController.text = savedPassword;
+        _rememberMe = true;
+      });
+    }
+  }
 
   Future<void> _login() async {
     setState(() {
@@ -22,15 +44,18 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      // Zavoláme login funkci z ApiService a dostaneme zpět Map s výsledkem
       final result = await ApiService.login(
         _usernameController.text,
         _passwordController.text,
       );
 
-      // Zkontrolujeme, zda odpověď obsahuje token
       if (result.containsKey('token')) {
-        // Přesměrování při úspěšném přihlášení
+        if (_rememberMe) {
+          _saveCredentials(); // Uložíme přihlašovací údaje
+        } else {
+          _clearCredentials(); // Vymažeme uložené přihlašovací údaje, pokud checkbox není zaškrtnutý
+        }
+
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -44,7 +69,6 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     } catch (error) {
-      // Zachycení případné chyby a nastavení obecné chybové zprávy
       setState(() {
         _errorMessage = 'An error occurred. Please try again.';
       });
@@ -53,6 +77,18 @@ class _LoginScreenState extends State<LoginScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _saveCredentials() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString('username', _usernameController.text);
+    await prefs.setString('password', _passwordController.text);
+  }
+
+  Future<void> _clearCredentials() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove('username');
+    await prefs.remove('password');
   }
 
   @override
@@ -67,7 +103,6 @@ class _LoginScreenState extends State<LoginScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Přidání nadpisu s názvem aplikace a sloganem bez stylování
                 const Text(
                   'Reloading Tracker App',
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
@@ -79,9 +114,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(fontSize: 16, color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(
-                    height:
-                        32), // Větší mezera mezi nadpisem a přihlašovacími poli
+                const SizedBox(height: 32),
                 TextField(
                   controller: _usernameController,
                   decoration: InputDecoration(
@@ -101,6 +134,20 @@ class _LoginScreenState extends State<LoginScreen> {
                     fillColor: Colors.grey[200],
                   ),
                   obscureText: true,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _rememberMe,
+                      onChanged: (bool? value) {
+                        setState(() {
+                          _rememberMe = value ?? false;
+                        });
+                      },
+                    ),
+                    const Text('Remember me'),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 if (_errorMessage != null)

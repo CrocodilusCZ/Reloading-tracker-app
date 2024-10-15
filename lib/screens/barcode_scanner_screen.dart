@@ -144,42 +144,106 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
         return AlertDialog(
           title: const Text('Přiřadit čárový kód'),
           content: SingleChildScrollView(
-            child: ListBody(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 const Text('Vyberte náboj pro přiřazení čárového kódu:'),
+                const SizedBox(height: 10),
                 ...cartridgesResponse.map<Widget>((cartridge) {
-                  return ListTile(
-                    title: Text(cartridge['name']),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                            'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}'),
-                        Text('Kalibr: ${cartridge['caliber']['name']}'),
-                        Text(
-                            'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}'),
-                        Text('Cena za kus: ${cartridge['price']} Kč'),
-                        Text(
-                            'Skladová zásoba: ${cartridge['stock_quantity']} ks'),
-                      ],
+                  bool hasBarcode = cartridge['barcode'] != null &&
+                      cartridge['barcode'] != '';
+                  return Container(
+                    margin: const EdgeInsets.symmetric(vertical: 5),
+                    child: ElevatedButton(
+                      onPressed: hasBarcode
+                          ? null
+                          : () async {
+                              await ApiService.assignBarcode(
+                                  cartridge['id'], scannedBarcode);
+                              Navigator.pop(dialogContext); // Zavřít dialog
+
+                              // Zobrazení detailů náboje při potvrzení
+                              _showMessage(
+                                  'Čárový kód byl přiřazen k náboji: ${cartridge['name']}\n'
+                                  'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}\n'
+                                  'Kalibr: ${cartridge['caliber']['name']}\n'
+                                  'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}\n'
+                                  'Cena za kus: ${cartridge['price']} Kč\n'
+                                  'Skladová zásoba: ${cartridge['stock_quantity']} ks');
+
+                              // Resetujeme skener po dokončení akce
+                              await _resetScanner();
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: hasBarcode
+                            ? Colors.grey
+                            : Theme.of(context).primaryColor,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4.0),
+                          side: BorderSide(color: Colors.black, width: 2.0),
+                        ),
+                        minimumSize: Size(double.infinity, 60),
+                        padding: EdgeInsets.symmetric(
+                            vertical: 16.0, horizontal: 12.0),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            cartridge['name'],
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: hasBarcode ? Colors.black54 : Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}',
+                            style: TextStyle(
+                              color:
+                                  hasBarcode ? Colors.black54 : Colors.white70,
+                            ),
+                          ),
+                          Text(
+                            'Kalibr: ${cartridge['caliber']['name']}',
+                            style: TextStyle(
+                              color:
+                                  hasBarcode ? Colors.black54 : Colors.white70,
+                            ),
+                          ),
+                          Text(
+                            'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}',
+                            style: TextStyle(
+                              color:
+                                  hasBarcode ? Colors.black54 : Colors.white70,
+                            ),
+                          ),
+                          Text(
+                            'Cena za kus: ${cartridge['price']} Kč',
+                            style: TextStyle(
+                              color:
+                                  hasBarcode ? Colors.black54 : Colors.white70,
+                            ),
+                          ),
+                          Text(
+                            'Skladová zásoba: ${cartridge['stock_quantity']} ks',
+                            style: TextStyle(
+                              color:
+                                  hasBarcode ? Colors.black54 : Colors.white70,
+                            ),
+                          ),
+                          if (hasBarcode)
+                            const Text(
+                              'Čárový kód již přiřazen',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                    onTap: () async {
-                      await ApiService.assignBarcode(
-                          cartridge['id'], scannedBarcode);
-                      Navigator.pop(dialogContext); // Zavřít dialog
-
-                      // Zobrazení detailů náboje při potvrzení
-                      _showMessage(
-                          'Čárový kód byl přiřazen k náboji: ${cartridge['name']}\n'
-                          'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}\n'
-                          'Kalibr: ${cartridge['caliber']['name']}\n'
-                          'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}\n'
-                          'Cena za kus: ${cartridge['price']} Kč\n'
-                          'Skladová zásoba: ${cartridge['stock_quantity']} ks');
-
-                      // Resetujeme skener po dokončení akce
-                      await _resetScanner();
-                    },
                   );
                 }).toList(),
               ],
