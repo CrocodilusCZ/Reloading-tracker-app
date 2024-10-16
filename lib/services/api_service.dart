@@ -315,4 +315,29 @@ class ApiService {
           'Failed to load user weapons. Status: ${response.statusCode}');
     }
   }
+
+  // Načtení aktivit uživatele
+  static Future<List<dynamic>> getUserActivities() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token'); // Získání tokenu
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/activities'),
+      headers: {
+        'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
+        'Content-Type': 'application/json',
+      },
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body)
+          as List<dynamic>; // Očekáváme seznam aktivit
+    } else {
+      throw Exception('Chyba při načítání aktivit: ${response.statusCode}');
+    }
+  }
 }

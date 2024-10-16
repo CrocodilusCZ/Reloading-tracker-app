@@ -17,6 +17,8 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   String? cartridgeInfo; // Proměnná pro zobrazení informací o náboji
   Map<String, dynamic>? cartridgeData; // Proměnná pro uložení dat z API
   List<dynamic> userWeapons = []; // Proměnná pro zbraně uživatele
+  List<dynamic> userActivities = []; // Proměnná pro aktivity uživatele
+  bool isLoading = false; // Přidána proměnná isLoading pro sledování načítání
 
   @override
   void reassemble() {
@@ -82,6 +84,63 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     }
   }
 
+  // Volání API pro získání aktivit uživatele
+  Future<void> _fetchUserActivities() async {
+    setState(() {
+      isLoading = true; // Začátek načítání
+    });
+    try {
+      final activitiesResponse =
+          await ApiService.getUserActivities(); // Volání API
+      setState(() {
+        userActivities = activitiesResponse; // Uložení aktivit uživatele
+      });
+    } catch (e) {
+      print('Chyba při načítání aktivit: $e');
+    } finally {
+      setState(() {
+        isLoading = false; // Konec načítání
+      });
+    }
+  }
+
+  // Zobrazení dialogového okna s výpisem aktivit
+  void _showActivitiesDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Vyberte aktivitu'),
+          content: userActivities.isNotEmpty
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: userActivities.map((activity) {
+                    return ListTile(
+                      title: Text(activity['activity_name']),
+                      subtitle: Text('Datum: ${activity['date'] ?? 'N/A'}'),
+                      onTap: () {
+                        Navigator.of(context)
+                            .pop(); // Zavřít dialog po výběru aktivity
+                        _showShootingLogForm(
+                            activity['id']); // Použijte ID aktivity
+                      },
+                    );
+                  }).toList(),
+                )
+              : Text('Žádné aktivity nebyly nalezeny.'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Zavřít dialog bez výběru
+              },
+              child: const Text('Zavřít'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // Zobrazení dialogového okna s výpisem zbraní
   void _showWeaponsDialog() {
     controller?.pauseCamera(); // Pauza kamery při otevření dialogu
@@ -123,11 +182,31 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   }
 
   // Formulář pro vytvoření nového záznamu ve střeleckém deníku
-  void _showShootingLogForm(int weaponId) {
+  void _showShootingLogForm(int weaponId) async {
+    await _fetchUserActivities(); // Čeká na dokončení načítání aktivit
+
+    if (isLoading) {
+      // Zobrazení načítání, pokud data ještě nejsou načtena
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return Center(
+            child: CircularProgressIndicator(),
+          );
+        },
+      );
+      return; // Ukončíme zobrazení, dokud nejsou data připravena
+    }
+
     TextEditingController ammoCountController = TextEditingController();
-    TextEditingController activityTypeController = TextEditingController();
     TextEditingController noteController = TextEditingController();
-    TextEditingController dateController = TextEditingController();
+
+    // Získání dnešního data a formátování na 'YYYY-MM-DD'
+    String todayDate = DateTime.now().toIso8601String().substring(0, 10);
+    TextEditingController dateController =
+        TextEditingController(text: todayDate); // Přednastavené dnešní datum
+
+    String? selectedActivity; // Proměnná pro vybranou aktivitu
 
     controller?.pauseCamera(); // Pauza kamery při otevření dialogu
 
@@ -145,9 +224,21 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                       InputDecoration(labelText: 'Počet vystřelených nábojů'),
                   keyboardType: TextInputType.number,
                 ),
-                TextField(
-                  controller: activityTypeController,
+                DropdownButtonFormField<String>(
                   decoration: InputDecoration(labelText: 'Typ aktivity'),
+                  value: selectedActivity, // Výchozí hodnota
+                  items:
+                      userActivities.map<DropdownMenuItem<String>>((activity) {
+                    return DropdownMenuItem<String>(
+                      value: activity['activity_name'],
+                      child: Text(activity['activity_name']),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      selectedActivity = value; // Uložení vybrané aktivity
+                    });
+                  },
                 ),
                 TextField(
                   controller: dateController,
@@ -170,12 +261,12 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
             TextButton(
               onPressed: () {
                 if (ammoCountController.text.isNotEmpty &&
-                    activityTypeController.text.isNotEmpty &&
+                    selectedActivity != null &&
                     dateController.text.isNotEmpty) {
                   _createShootingLog(
                     weaponId,
                     int.parse(ammoCountController.text),
-                    activityTypeController.text,
+                    selectedActivity!, // Použití vybrané aktivity
                     dateController.text,
                     noteController.text,
                   );
