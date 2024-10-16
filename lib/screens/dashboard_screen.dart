@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:simple_login_app/services/api_service.dart'; // Import API služby
 import 'package:simple_login_app/screens/barcode_scanner_screen.dart'; // Import BarcodeScannerScreen
 import 'package:simple_login_app/screens/favorite_cartridges_screen.dart';
+import 'package:simple_login_app/screens/shooting_log_screen.dart'; // Import nové obrazovky pro střelecký deník
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -84,6 +85,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Text(_showFactoryCartridges
                       ? 'Skrýt tovární náboje'
                       : 'Zobrazit tovární náboje'),
+                ),
+                const SizedBox(height: 16),
+                // Přidání nového tlačítka "Přidat záznam do střeleckého deníku"
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            const ShootingLogScreen(), // Spuštění obrazovky pro střelecký deník
+                      ),
+                    );
+                  },
+                  child: const Text('Přidat záznam do střeleckého deníku'),
                 ),
                 const SizedBox(height: 16),
                 // Zobrazení seznamu továrních nábojů, pokud je _showFactoryCartridges true

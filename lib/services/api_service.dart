@@ -4,7 +4,8 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://172.20.10.2:8000/api';
+  static const String baseUrl = 'https://www.reloading-tracker.cz/api';
+
   static final CookieJar _cookieJar = CookieJar();
 
   // Přihlášení uživatele
@@ -32,6 +33,34 @@ class ApiService {
         'status': 'error',
         'message': 'Login failed. Please check your credentials.',
       };
+    }
+  }
+
+  //Funkce pro shooting log
+  static Future<Map<String, dynamic>> addShootingLog(String code) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final url = Uri.parse('$baseUrl/shooting-log');
+    final response = await http.post(
+      url,
+      headers: <String, String>{
+        'Content-Type': 'application/json; charset=UTF-8',
+        'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
+      },
+      body: jsonEncode(<String, String>{
+        'code': code,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to add shooting log');
     }
   }
 
@@ -212,6 +241,78 @@ class ApiService {
     } else {
       throw Exception(
           'Failed to increase stock by barcode: ${response.statusCode}');
+    }
+  }
+
+  // Nová metoda - vytvoření záznamu střeleckého deníku s logováním
+  static Future<Map<String, dynamic>> createShootingLog(
+      Map<String, dynamic> shootingLogData) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    // Logování dat, která se budou odesílat
+    print('Odesílání dat na API (createShootingLog): $shootingLogData');
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/shooting-logs'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token', // Přidání tokenu pro ověření
+        },
+        body: jsonEncode(shootingLogData),
+      );
+
+      // Logování odpovědi z API
+      print('HTTP Response Code: ${response.statusCode}');
+      print('HTTP Response Body: ${response.body}');
+
+      if (response.statusCode == 201) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        throw Exception('Failed to create shooting log: ${response.body}');
+      }
+    } catch (e) {
+      // Logování chyby v případě neúspěšného pokusu
+      print('Chyba při vytváření záznamu ve střeleckém deníku: $e');
+      throw Exception('Chyba při vytváření záznamu ve střeleckém deníku: $e');
+    }
+  }
+
+  // Volání API pro získání zbraní uživatele podle kalibru
+  static Future<List<dynamic>> getUserWeaponsByCaliber(int caliberId) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    // Debug výpis pro kontrolu tokenu
+    print('Token: $token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    // Oprava URL, pokud používáš endpoint by-caliber
+    final response = await http.get(
+      Uri.parse('$baseUrl/weapons/by-caliber/$caliberId'), // Opravená URL
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token', // Přidání tokenu pro ověření
+      },
+    );
+
+    // Debug výpis pro kontrolu status kódu a odpovědi
+    print('Status code: ${response.statusCode}');
+    print('Response body: ${response.body}');
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as List<dynamic>;
+    } else {
+      throw Exception(
+          'Failed to load user weapons. Status: ${response.statusCode}');
     }
   }
 }
