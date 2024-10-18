@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'dart:io';
-import 'package:simple_login_app/services/api_service.dart'; // Import API služby
+import 'package:shooting_companion/services/api_service.dart'; // Import API služby
+import 'package:vibration/vibration.dart'; // Import balíčku vibration
 
 class ShootingLogScreen extends StatefulWidget {
   const ShootingLogScreen({Key? key}) : super(key: key);
@@ -59,6 +60,12 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
         cartridgeInfo = 'Náboj: ${response['cartridge']['name']}, '
             'Kalibr: ${response['cartridge']['caliber']['name']}';
       });
+
+      // Zavibrujte po úspěšném načtení dat
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(duration: 200); // Vibrace na 200 ms
+      }
+
       // Načtení zbraní odpovídajících kalibru
       _fetchUserWeapons(response['cartridge']['caliber']['id']);
     } catch (e) {
@@ -288,7 +295,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   // Vytvoření záznamu ve střeleckém deníku
   Future<void> _createShootingLog(
     int weaponId,
-    int ammoCount,
+    int shotsFired,
     String activityType,
     String date,
     String note,
@@ -307,15 +314,32 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
 
       final response = await ApiService.createShootingLog({
         "weapon_id": weaponId,
-        "cartridge_id": cartridgeId, // Dynamicky získané ID náboje
+        "cartridge_id": cartridgeId,
         "activity_type": activityType,
-        "ammo_count": ammoCount,
-        "activity_date": date,
+        "shots_fired": shotsFired, // Opravený název pole
+        "date": date, // Opravený název pole
         "note": note,
       });
-      print('Záznam ve střeleckém deníku byl úspěšně vytvořen: $response');
+
+      // Zpracování úspěšné odpovědi
+      if (response.containsKey('success') && response['success'] == true) {
+        print('Záznam ve střeleckém deníku byl úspěšně vytvořen: $response');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}')),
+        );
+      } else {
+        // Zpracování chyby, například nedostatečná zásoba nábojů
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(response['error'] ?? 'Chyba při ukládání.')),
+        );
+      }
     } catch (e) {
       print('Chyba při vytváření záznamu ve střeleckém deníku: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Chyba při vytváření záznamu.')),
+      );
     }
   }
 

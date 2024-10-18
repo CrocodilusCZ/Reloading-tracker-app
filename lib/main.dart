@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-//import 'package:simple_login_app/services/api_service.dart';
-import 'package:simple_login_app/screens/login_screen.dart'; // Opravený import pro LoginScreen
-//import 'package:simple_login_app/screens/favorite_cartridges_screen.dart'; 
+//import 'package:shooting_companion/services/api_service.dart';
+import 'package:shooting_companion/screens/login_screen.dart'; // Opravený import pro LoginScreen
+//import 'package:shooting_companion/screens/favorite_cartridges_screen.dart';
 
 void main() {
   runApp(const MyApp());

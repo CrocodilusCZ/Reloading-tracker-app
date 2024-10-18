@@ -26,6 +26,8 @@ class ApiService {
       final token = responseData['token'];
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString('api_token', token);
+      await prefs.setString(
+          'user_nickname', responseData['name']); // Ukládáme nick
       return responseData;
     } else {
       print('Login failed: ${response.body}');
@@ -217,6 +219,126 @@ class ApiService {
     }
   }
 
+  // Načtení přebíjených nábojů uživatele
+  static Future<List<dynamic>> getReloadCartridges() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/cartridges/reload'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token', // Token přidaný do hlavičky
+      },
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as List<dynamic>;
+    } else {
+      throw Exception('Failed to load reload cartridges');
+    }
+  }
+
+  // Získání seznamu všech nábojů a následné rozdělení na tovární a přebíjené
+  static Future<Map<String, List<Map<String, dynamic>>>>
+      getAllCartridges() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/cartridges'), // Načtení všech nábojů
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
+
+    if (response.statusCode == 200) {
+      List<dynamic> cartridges = jsonDecode(response.body) as List<dynamic>;
+
+      // Přetypování seznamu dynamických prvků na seznam map
+      List<Map<String, dynamic>> factoryCartridges = cartridges
+          .where((cartridge) => cartridge['type'] == 'factory')
+          .map((cartridge) => Map<String, dynamic>.from(cartridge))
+          .toList();
+
+      List<Map<String, dynamic>> reloadCartridges = cartridges
+          .where((cartridge) => cartridge['type'] == 'reload')
+          .map((cartridge) => Map<String, dynamic>.from(cartridge))
+          .toList();
+
+      // Vrácení jako mapy se dvěma seznamy
+      return {
+        'factory': factoryCartridges,
+        'reload': reloadCartridges,
+      };
+    } else {
+      throw Exception('Failed to load cartridges');
+    }
+  }
+
+  // Metoda pro získání skladových zásob komponent
+  static Future<Map<String, List<Map<String, dynamic>>>>
+      getInventoryComponents() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/inventory-components'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token', // Použití tokenu
+      },
+    );
+
+    // Logování celého těla odpovědi
+    print('Response body: ${response.body}');
+
+    if (response.statusCode == 200) {
+      // Zpracování odpovědi z JSON formátu
+      Map<String, dynamic> responseData = jsonDecode(response.body);
+
+      // Specifické logování pro sekci brasses (nábojnice)
+      List<Map<String, dynamic>> brasses =
+          List<Map<String, dynamic>>.from(responseData['brasses']);
+      print('Brasses count: ${brasses.length}');
+
+      brasses.forEach((brass) {
+        print(
+            'Brass name: ${brass['name']}, Stock: ${brass['stock_quantity']}');
+
+        if (brass['caliber'] != null) {
+          print(
+              'Caliber for brass ${brass['name']}: ${brass['caliber']['name']}');
+        } else {
+          print('Caliber is missing for brass ${brass['name']}');
+        }
+      });
+
+      // Přetypování každé části (bullets, powders, primers, brasses) na List<Map<String, dynamic>>
+      return {
+        'bullets': List<Map<String, dynamic>>.from(responseData['bullets']),
+        'powders': List<Map<String, dynamic>>.from(responseData['powders']),
+        'primers': List<Map<String, dynamic>>.from(responseData['primers']),
+        'brasses': brasses,
+      };
+    } else {
+      throw Exception('Failed to load inventory components');
+    }
+  }
+
 // Navýšení skladové zásoby náboje pomocí čárového kódu
   static Future<Map<String, dynamic>> increaseStockByBarcode(
       String barcode, int quantity) async {
@@ -262,6 +384,7 @@ class ApiService {
         Uri.parse('$baseUrl/shooting-logs'),
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json', // Přidání hlavičky Accept
           'Authorization': 'Bearer $token', // Přidání tokenu pro ověření
         },
         body: jsonEncode(shootingLogData),
@@ -271,13 +394,20 @@ class ApiService {
       print('HTTP Response Code: ${response.statusCode}');
       print('HTTP Response Body: ${response.body}');
 
-      if (response.statusCode == 201) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final jsonResponse = jsonDecode(response.body);
+
+        if (jsonResponse.containsKey('success') &&
+            jsonResponse['success'] == true) {
+          return jsonResponse;
+        } else {
+          throw Exception(
+              'Failed to create shooting log: ${jsonResponse['error']}');
+        }
       } else {
         throw Exception('Failed to create shooting log: ${response.body}');
       }
     } catch (e) {
-      // Logování chyby v případě neúspěšného pokusu
       print('Chyba při vytváření záznamu ve střeleckém deníku: $e');
       throw Exception('Chyba při vytváření záznamu ve střeleckém deníku: $e');
     }

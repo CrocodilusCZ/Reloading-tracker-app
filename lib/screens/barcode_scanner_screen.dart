@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
-import 'package:simple_login_app/services/api_service.dart'; // Import API služby
+import 'package:shooting_companion/services/api_service.dart'; // Import API služby
+import 'package:vibration/vibration.dart';
 
 class BarcodeScannerScreen extends StatefulWidget {
   const BarcodeScannerScreen({Key? key}) : super(key: key);
@@ -26,13 +27,20 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     this.controller = controller;
     controller.scannedDataStream.listen((scanData) async {
       if (!isProcessing) {
-        isProcessing = true; // Okamžitě nastavíme isProcessing na true
+        isProcessing =
+            true; // Nastavení na true, aby se zabránilo opakovanému zpracování
         await controller.pauseCamera(); // Pozastavíme skener
         setState(() {
           scannedCode = scanData.code;
         });
-        await _checkBarcode(scannedCode!);
-        // Skener znovu spustíme po dokončení akce v dialozích
+
+        // Zavibrovat po naskenování kódu
+        if (await Vibration.hasVibrator() ?? false) {
+          Vibration.vibrate(duration: 500); // Zavibruje na 500 ms
+        }
+
+        await _checkBarcode(
+            scannedCode!); // Volání funkce pro kontrolu čárového kódu
       }
     });
   }

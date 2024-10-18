@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:simple_login_app/services/api_service.dart';
-import 'package:simple_login_app/screens/dashboard_screen.dart'; // Správný import pro DashboardScreen
+import 'package:shooting_companion/services/api_service.dart';
+import 'package:shooting_companion/screens/dashboard_screen.dart'; // Správný import pro DashboardScreen
 import 'package:shared_preferences/shared_preferences.dart'; // Import pro shared_preferences
 
 class LoginScreen extends StatefulWidget {
@@ -104,13 +104,13 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Reloading Tracker App',
+                  'Shooting Companion',
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Your Reloading Companion',
+                  'Manage Your Reloads and Shooting Activities',
                   style: TextStyle(fontSize: 16, color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),

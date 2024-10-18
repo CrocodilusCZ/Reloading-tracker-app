@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:simple_login_app/services/api_service.dart'; // Import API služby
-import 'package:simple_login_app/screens/barcode_scanner_screen.dart'; // Import BarcodeScannerScreen
-import 'package:simple_login_app/screens/favorite_cartridges_screen.dart';
-import 'package:simple_login_app/screens/shooting_log_screen.dart'; // Import nové obrazovky pro střelecký deník
+import 'package:shooting_companion/services/api_service.dart';
+import 'package:shooting_companion/screens/barcode_scanner_screen.dart';
+import 'package:shooting_companion/screens/favorite_cartridges_screen.dart';
+import 'package:shooting_companion/screens/shooting_log_screen.dart';
+import 'package:shooting_companion/screens/inventory_components_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -14,13 +15,14 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  late Future<List<dynamic>> _factoryCartridgesFuture;
-  bool _showFactoryCartridges = false; // Přidání proměnné pro zobrazení
+  late Future<Map<String, List<Map<String, dynamic>>>> _cartridgesFuture;
+  bool _showFactoryCartridges = false;
 
   @override
   void initState() {
     super.initState();
-    _factoryCartridgesFuture = ApiService.getFactoryCartridges();
+    // Načtení všech nábojů najednou
+    _cartridgesFuture = ApiService.getAllCartridges();
   }
 
   @override
@@ -28,112 +30,159 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Domovská Stránka'),
+        backgroundColor: Colors.blueGrey,
       ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Align(
-              alignment: Alignment.topLeft, // Zarovnání textu nahoře vlevo
+              alignment: Alignment.topLeft,
               child: Text(
                 'Uživatel: ${widget.username}',
-                style: Theme.of(context).textTheme.headlineSmall,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                    ),
               ),
             ),
           ),
-          const Spacer(), // Přidání mezery mezi textem a tlačítky
+          const Spacer(),
           Center(
-            // Centrování tlačítek
             child: Column(
-              mainAxisAlignment:
-                  MainAxisAlignment.center, // Vertikální centrování sloupce
-              crossAxisAlignment:
-                  CrossAxisAlignment.center, // Horizontální centrování sloupce
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                ElevatedButton(
+                _buildButton(
+                  icon: Icons.book,
+                  text: 'Záznam do deníku',
+                  color: const Color(0xFF2F4F4F),
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) =>
-                            const BarcodeScannerScreen(), // Spuštění obrazovky pro skenování čárových kódů
+                        builder: (context) => const ShootingLogScreen(),
                       ),
                     );
                   },
-                  child: const Text('Skenovat Čárový Kód'),
                 ),
                 const SizedBox(height: 16),
-                ElevatedButton(
+                _buildButton(
+                  icon: Icons.qr_code_scanner,
+                  text: 'Sken & Navýšení skladu',
+                  color: const Color(0xFF4682B4),
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const FavoriteCartridgesScreen(),
+                        builder: (context) => const BarcodeScannerScreen(),
                       ),
                     );
                   },
-                  child: const Text('Inventář'),
                 ),
                 const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      _showFactoryCartridges =
-                          !_showFactoryCartridges; // Přepnutí zobrazení seznamu
-                    });
-                  },
-                  child: Text(_showFactoryCartridges
-                      ? 'Skrýt tovární náboje'
-                      : 'Zobrazit tovární náboje'),
-                ),
-                const SizedBox(height: 16),
-                // Přidání nového tlačítka "Přidat záznam do střeleckého deníku"
-                ElevatedButton(
+                _buildButton(
+                  icon: Icons.inventory_2,
+                  text: 'Náboje',
+                  color: const Color(0xFF696969),
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) =>
-                            const ShootingLogScreen(), // Spuštění obrazovky pro střelecký deník
-                      ),
-                    );
-                  },
-                  child: const Text('Přidat záznam do střeleckého deníku'),
-                ),
-                const SizedBox(height: 16),
-                // Zobrazení seznamu továrních nábojů, pokud je _showFactoryCartridges true
-                if (_showFactoryCartridges)
-                  FutureBuilder<List<dynamic>>(
-                    future: _factoryCartridgesFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const CircularProgressIndicator();
-                      } else if (snapshot.hasError) {
-                        return Text('Chyba při načítání: ${snapshot.error}');
-                      } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                        return const Text('Žádné tovární náboje nenalezeny.');
-                      } else {
-                        // Zobrazit seznam továrních nábojů
-                        return ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: snapshot.data!.length,
-                          itemBuilder: (context, index) {
-                            final cartridge = snapshot.data![index];
-                            return ListTile(
-                              title: Text(cartridge['name']),
-                              subtitle: Text(
-                                  'Kalibr: ${cartridge['caliber']['name']}'),
-                            );
+                        builder: (context) => FutureBuilder(
+                          future: _cartridgesFuture,
+                          builder: (context,
+                              AsyncSnapshot<
+                                      Map<String, List<Map<String, dynamic>>>>
+                                  snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const CircularProgressIndicator();
+                            } else if (snapshot.hasError) {
+                              return Text('Chyba: ${snapshot.error}');
+                            } else if (!snapshot.hasData) {
+                              return const Text('Žádné náboje nenalezeny.');
+                            } else {
+                              List<Map<String, dynamic>> factoryCartridges =
+                                  snapshot.data!['factory']!;
+                              List<Map<String, dynamic>> reloadCartridges =
+                                  snapshot.data!['reload']!;
+                              return FavoriteCartridgesScreen(
+                                factoryCartridges: factoryCartridges,
+                                reloadCartridges: reloadCartridges,
+                              );
+                            }
                           },
-                        );
-                      }
-                    },
-                  ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                _buildButton(
+                  icon: Icons.visibility,
+                  text: 'Zobrazit komponenty',
+                  color: const Color(0xFF708090), // Břidlicově šedá
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            const InventoryComponentsScreen(), // Přesměrování na obrazovku komponent
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
-          const Spacer(), // Přidání mezery mezi tlačítky a spodní částí obrazovky
+          const Spacer(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildButton({
+    required IconData icon,
+    required String text,
+    required Color color,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: 300,
+      height: 50,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            Icon(
+              icon,
+              size: 24,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

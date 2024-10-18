@@ -3,7 +3,7 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:simple_login_app/services/api_service.dart';
+import 'package:shooting_companion/services/api_service.dart';
 
 class QRScanScreen extends StatefulWidget {
   const QRScanScreen({super.key});
@@ -29,7 +29,8 @@ class _QRScanScreenState extends State<QRScanScreen> {
       setState(() {});
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Kamera je potřeba pro skenování QR kódů')),
+        const SnackBar(
+            content: Text('Kamera je potřeba pro skenování QR kódů')),
       );
     }
   }
@@ -52,7 +53,8 @@ class _QRScanScreenState extends State<QRScanScreen> {
           Expanded(
             flex: 1,
             child: Center(
-              child: Text(isProcessing ? 'Zpracovává se...' : 'Naskenujte QR kód'),
+              child:
+                  Text(isProcessing ? 'Zpracovává se...' : 'Naskenujte QR kód'),
             ),
           )
         ],
@@ -68,7 +70,8 @@ class _QRScanScreenState extends State<QRScanScreen> {
           isProcessing = true;
         });
         controller.pauseCamera(); // Zastaví kameru po naskenování
-        _processScannedData(scanData.code!); // Použijte '!', protože scanData.code už není null
+        _processScannedData(
+            scanData.code!); // Použijte '!', protože scanData.code už není null
       }
     });
   }
@@ -88,7 +91,9 @@ class _QRScanScreenState extends State<QRScanScreen> {
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Chyba při získávání informací o náboji: ${cartridge['message']}')),
+          SnackBar(
+              content: Text(
+                  'Chyba při získávání informací o náboji: ${cartridge['message']}')),
         );
       }
     } catch (error) {
@@ -102,16 +107,17 @@ class _QRScanScreenState extends State<QRScanScreen> {
     }
   }
 
-  Future<String?> _showActionDialog(BuildContext context, Map<String, dynamic> cartridge) async {
+  Future<String?> _showActionDialog(
+      BuildContext context, Map<String, dynamic> cartridge) async {
     return showDialog<String>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: Text('Vyberte akci pro ${cartridge['name']}'),
           content: Text('Chcete zásobu nábojů navýšit nebo snížit? \n\n'
-                        'Náboj: ${cartridge['description']}\n'
-                        'Kalibr: ${cartridge['caliber_name']}\n'
-                        'Skladem: ${cartridge['stock_quantity']} ks'),
+              'Náboj: ${cartridge['description']}\n'
+              'Kalibr: ${cartridge['caliber_name']}\n'
+              'Skladem: ${cartridge['stock_quantity']} ks'),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.pop(context, 'increase'),
@@ -129,18 +135,27 @@ class _QRScanScreenState extends State<QRScanScreen> {
 
   Future<void> _sendRequestToServer(int cartridgeId, String action) async {
     try {
-      final cartridgeBeforeUpdate = await ApiService.getCartridgeById(cartridgeId);
-      final int oldQuantity = cartridgeBeforeUpdate['cartridge']['stock_quantity'];
+      final cartridgeBeforeUpdate =
+          await ApiService.getCartridgeById(cartridgeId);
+      final int oldQuantity =
+          cartridgeBeforeUpdate['cartridge']['stock_quantity'];
 
       int quantityChange = action == 'increase' ? 50 : -50;
 
-      final response = await ApiService.updateCartridgeQuantity(cartridgeId, quantityChange);
+      final response =
+          await ApiService.updateCartridgeQuantity(cartridgeId, quantityChange);
 
       if (response['status'] == 'success') {
-        final cartridgeAfterUpdate = await ApiService.getCartridgeById(cartridgeId);
-        final int newQuantity = cartridgeAfterUpdate['cartridge']['stock_quantity'];
+        final cartridgeAfterUpdate =
+            await ApiService.getCartridgeById(cartridgeId);
+        final int newQuantity =
+            cartridgeAfterUpdate['cartridge']['stock_quantity'];
 
-        await _showConfirmationScreen(context, cartridgeBeforeUpdate['cartridge']['name'], oldQuantity, newQuantity);
+        await _showConfirmationScreen(
+            context,
+            cartridgeBeforeUpdate['cartridge']['name'],
+            oldQuantity,
+            newQuantity);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Chyba: ${response['message']}')),
@@ -153,7 +168,8 @@ class _QRScanScreenState extends State<QRScanScreen> {
     }
   }
 
-  Future<void> _showConfirmationScreen(BuildContext context, String cartridgeName, int oldQuantity, int newQuantity) async {
+  Future<void> _showConfirmationScreen(BuildContext context,
+      String cartridgeName, int oldQuantity, int newQuantity) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
@@ -185,7 +201,8 @@ class _QRScanScreenState extends State<QRScanScreen> {
       });
       controller?.resumeCamera(); // Obnovení kamery po potvrzení pokračování
     } else {
-      Navigator.of(context).pop(); // Vrať se zpět na předchozí obrazovku (dashboard)
+      Navigator.of(context)
+          .pop(); // Vrať se zpět na předchozí obrazovku (dashboard)
     }
   }
 

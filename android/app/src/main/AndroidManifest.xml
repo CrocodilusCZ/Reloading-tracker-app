@@ -5,7 +5,7 @@
 
     
     <application
-        android:label="simple_login_app"
+        android:label="Shooting Companion"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
