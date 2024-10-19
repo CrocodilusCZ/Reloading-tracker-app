@@ -38,6 +38,30 @@ class ApiService {
     }
   }
 
+  // Načtení kalibrů uživatele
+  static Future<List<dynamic>> getCalibers() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/user-calibers'), // Odpovídající endpoint pro kalibry
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as List<dynamic>;
+    } else {
+      throw Exception('Failed to load calibers: ${response.statusCode}');
+    }
+  }
+
   //Funkce pro shooting log
   static Future<Map<String, dynamic>> addShootingLog(String code) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();

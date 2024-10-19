@@ -17,8 +17,32 @@ class FavoriteCartridgesScreen extends StatefulWidget {
 }
 
 class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
-  bool _showFactoryCartridges =
-      true; // Přepínání mezi továrními a přebíjenými náboji
+  bool _showFactoryCartridges = true;
+  String? selectedCaliber;
+  List<String> calibers = []; // Seznam kalibrů pro filtr
+
+  @override
+  void initState() {
+    super.initState();
+    // Načtení počátečního seznamu kalibrů
+    _updateCalibers();
+  }
+
+  void _updateCalibers() {
+    // Dynamické načítání kalibrů na základě aktuální záložky
+    calibers = _getUniqueCalibers(_showFactoryCartridges
+        ? widget.factoryCartridges
+        : widget.reloadCartridges);
+    calibers.insert(0, "Vše"); // Přidání možnosti "Vše" na začátek seznamu
+    selectedCaliber = "Vše"; // Výchozí hodnota
+  }
+
+  List<String> _getUniqueCalibers(List<Map<String, dynamic>> cartridges) {
+    return cartridges
+        .map((cartridge) => cartridge['caliber']['name'] as String)
+        .toSet()
+        .toList();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +61,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
               onPressed: (index) {
                 setState(() {
                   _showFactoryCartridges = index == 0;
+                  _updateCalibers(); // Aktualizace kalibrů při změně záložky
                 });
               },
               children: const [
@@ -52,7 +77,28 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
             ),
           ),
 
-          // Zobrazení nábojů podle přepínače
+          // Dropdown pro výběr kalibru
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+            child: DropdownButton<String>(
+              value: selectedCaliber,
+              hint: const Text("Vyberte kalibr"),
+              onChanged: (String? newValue) {
+                setState(() {
+                  selectedCaliber = newValue;
+                });
+              },
+              isExpanded: true,
+              items: calibers
+                  .map((caliber) => DropdownMenuItem<String>(
+                        value: caliber,
+                        child: Text(caliber),
+                      ))
+                  .toList(),
+            ),
+          ),
+
+          // Zobrazení nábojů podle přepínače a filtru kalibru
           Expanded(
             child: _showFactoryCartridges
                 ? _buildCartridgeSection(widget.factoryCartridges, context)
@@ -63,12 +109,23 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     );
   }
 
+  List<Map<String, dynamic>> _filterByCaliber(
+      List<Map<String, dynamic>> cartridges) {
+    if (selectedCaliber == null || selectedCaliber == "Vše") {
+      return cartridges; // Pokud není vybrán žádný kalibr nebo je vybráno "Vše", vrátíme všechny náboje
+    }
+    return cartridges
+        .where((cartridge) => cartridge['caliber']['name'] == selectedCaliber)
+        .toList();
+  }
+
   Widget _buildCartridgeSection(
       List<Map<String, dynamic>> cartridges, BuildContext context) {
+    final filteredCartridges = _filterByCaliber(cartridges);
     return ListView.builder(
-      itemCount: cartridges.length,
+      itemCount: filteredCartridges.length,
       itemBuilder: (context, index) {
-        final cartridge = cartridges[index];
+        final cartridge = filteredCartridges[index];
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 8),
           elevation: 3,

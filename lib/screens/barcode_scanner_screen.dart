@@ -27,35 +27,30 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     this.controller = controller;
     controller.scannedDataStream.listen((scanData) async {
       if (!isProcessing) {
-        isProcessing =
-            true; // Nastavení na true, aby se zabránilo opakovanému zpracování
-        await controller.pauseCamera(); // Pozastavíme skener
+        isProcessing = true;
+        await controller.pauseCamera();
         setState(() {
           scannedCode = scanData.code;
         });
 
-        // Zavibrovat po naskenování kódu
         if (await Vibration.hasVibrator() ?? false) {
-          Vibration.vibrate(duration: 500); // Zavibruje na 500 ms
+          Vibration.vibrate(duration: 500);
         }
 
-        await _checkBarcode(
-            scannedCode!); // Volání funkce pro kontrolu čárového kódu
+        await _checkBarcode(scannedCode!);
       }
     });
   }
 
-  // Funkce pro obnovení stavu skeneru po dokončení akce
   Future<void> _resetScanner() async {
     setState(() {
       scannedCode = null;
       barcodeStatus = null;
     });
-    await controller?.resumeCamera(); // Obnovíme skener
-    isProcessing = false; // Připravíme na další sken
+    await controller?.resumeCamera();
+    isProcessing = false;
   }
 
-  // Funkce pro ověření, zda je čárový kód přiřazen
   Future<void> _checkBarcode(String scannedBarcode) async {
     final response = await ApiService.checkBarcode(scannedBarcode);
     print('Odpověď API (kontrola čárového kódu): $response');
@@ -65,7 +60,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
         barcodeStatus =
             'Čárový kód je přiřazen k náboji ${response['cartridge']['name']}';
       });
-      // Zkontrolujeme, zda existuje 'caliber'
+
       String caliberName = response['cartridge']['caliber'] != null
           ? response['cartridge']['caliber']['name']
           : 'Neznámý kalibr';
@@ -79,12 +74,10 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
       setState(() {
         barcodeStatus = 'Čárový kód není přiřazen.';
       });
-      // Nabídka přiřazení čárového kódu
-      await _showAssignBarcodeDialog(scannedBarcode);
+      await _showAssignBarcodeDialog(scannedBarcode); // Přímo zobrazíme dialog
     }
   }
 
-  // Funkce pro zobrazení dialogu k navýšení skladové zásoby
   Future<void> _showIncreaseStockDialog(String scannedBarcode,
       String cartridgeName, String manufacturerName, String caliber) async {
     int quantity = 0;
@@ -105,30 +98,24 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
             TextButton(
               onPressed: () async {
                 quantity = int.tryParse(quantityController.text) ?? 0;
-                Navigator.pop(dialogContext); // Zavřít dialog
+                Navigator.pop(dialogContext);
                 if (quantity > 0) {
                   try {
-                    // Navýšení skladové zásoby přes API
                     await ApiService.increaseStockByBarcode(
                         scannedBarcode, quantity);
-
-                    // Zobrazení zprávy o úspěšném navýšení skladové zásoby
                     _showMessage(
                         'Skladová zásoba byla navýšena o $quantity kusů.');
                   } catch (e) {
-                    // Zobrazit chybovou zprávu, pokud navýšení selže
                     _showMessage('Chyba při navýšení skladové zásoby.');
                   }
                 }
-                // Resetujeme skener po dokončení akce
                 await _resetScanner();
               },
               child: const Text('OK'),
             ),
             TextButton(
               onPressed: () async {
-                Navigator.pop(dialogContext); // Zavřít dialog bez akce
-                // Resetujeme skener po zavření dialogu
+                Navigator.pop(dialogContext);
                 await _resetScanner();
               },
               child: const Text('Zrušit'),
@@ -139,14 +126,12 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     );
   }
 
-  // Funkce pro zobrazení dialogu s továrními náboji pro přiřazení čárového kódu
   Future<void> _showAssignBarcodeDialog(String scannedBarcode) async {
     final cartridgesResponse = await ApiService.getFactoryCartridges();
     print('Odpověď API (seznam továrních nábojů): $cartridgesResponse');
 
     if (cartridgesResponse.isEmpty) {
       _showMessage('Nemáte žádné tovární náboje k přiřazení.');
-      // Resetujeme skener, protože není žádná akce k provedení
       await _resetScanner();
       return;
     }
@@ -154,9 +139,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     await showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
-        // Uložíme dialogContext
         return AlertDialog(
-          title: const Text('Přiřadit čárový kód'),
+          title: const Text('Přiřadit čárový kód nebo vytvořit nový náboj'),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -174,9 +158,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                           : () async {
                               await ApiService.assignBarcode(
                                   cartridge['id'], scannedBarcode);
-                              Navigator.pop(dialogContext); // Zavřít dialog
-
-                              // Zobrazení detailů náboje při potvrzení
+                              Navigator.pop(dialogContext);
                               _showMessage(
                                   'Čárový kód byl přiřazen k náboji: ${cartridge['name']}\n'
                                   'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}\n'
@@ -184,8 +166,6 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                                   'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}\n'
                                   'Cena za kus: ${cartridge['price']} Kč\n'
                                   'Skladová zásoba: ${cartridge['stock_quantity']} ks');
-
-                              // Resetujeme skener po dokončení akce
                               await _resetScanner();
                             },
                       style: ElevatedButton.styleFrom(
@@ -194,10 +174,11 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                             : Theme.of(context).primaryColor,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(4.0),
-                          side: BorderSide(color: Colors.black, width: 2.0),
+                          side:
+                              const BorderSide(color: Colors.black, width: 2.0),
                         ),
-                        minimumSize: Size(double.infinity, 60),
-                        padding: EdgeInsets.symmetric(
+                        minimumSize: const Size(double.infinity, 60),
+                        padding: const EdgeInsets.symmetric(
                             vertical: 16.0, horizontal: 12.0),
                       ),
                       child: Column(
@@ -260,14 +241,38 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                     ),
                   );
                 }).toList(),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(dialogContext);
+                    await _showCreateNewCartridgeForm(scannedBarcode);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(4.0),
+                      side: const BorderSide(color: Colors.black, width: 2.0),
+                    ),
+                    minimumSize: const Size(double.infinity, 60),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 16.0, horizontal: 12.0),
+                  ),
+                  child: const Text(
+                    'Vytvořit nový náboj',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
           actions: <Widget>[
             TextButton(
               onPressed: () async {
-                Navigator.pop(dialogContext); // Zavřít dialog bez akce
-                // Resetujeme skener po zavření dialogu
+                Navigator.pop(dialogContext);
                 await _resetScanner();
               },
               child: const Text('Zrušit'),
@@ -278,7 +283,166 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     );
   }
 
-  // Zobrazení zprávy
+  Future<void> _showSelectionDialog(String scannedBarcode) async {
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Čárový kód není přiřazen'),
+          content: const Text('Vyberte možnost:'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await _showAssignBarcodeDialog(scannedBarcode);
+              },
+              child: const Text('Přiřadit k existujícímu náboji'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await _showCreateNewCartridgeForm(scannedBarcode);
+              },
+              child: const Text('Vytvořit nový náboj'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showCreateNewCartridgeForm(String scannedBarcode) async {
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController manufacturerController =
+        TextEditingController();
+    final TextEditingController bulletSpecController = TextEditingController();
+    final TextEditingController priceController = TextEditingController();
+    final TextEditingController stockController = TextEditingController();
+    bool isFavorite = false;
+    int? selectedCaliberId;
+
+    // Načtení seznamu kalibrů
+    final calibers =
+        await ApiService.getCalibers(); // Předpoklad metody na načtení kalibrů
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            return AlertDialog(
+              title: const Text('Vytvořit nový náboj'),
+              content: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration:
+                          const InputDecoration(labelText: 'Název náboje'),
+                    ),
+                    TextField(
+                      controller: manufacturerController,
+                      decoration: const InputDecoration(labelText: 'Výrobce'),
+                    ),
+                    TextField(
+                      controller: bulletSpecController,
+                      decoration: const InputDecoration(
+                          labelText: 'Specifikace střely'),
+                    ),
+                    TextField(
+                      controller: priceController,
+                      keyboardType: TextInputType.number,
+                      decoration:
+                          const InputDecoration(labelText: 'Cena za kus'),
+                    ),
+                    TextField(
+                      controller: stockController,
+                      keyboardType: TextInputType.number,
+                      decoration:
+                          const InputDecoration(labelText: 'Skladová zásoba'),
+                    ),
+                    DropdownButtonFormField<int>(
+                      decoration: const InputDecoration(labelText: 'Kalibr'),
+                      value: selectedCaliberId,
+                      items: calibers.map<DropdownMenuItem<int>>((caliber) {
+                        return DropdownMenuItem<int>(
+                          value: caliber['id'],
+                          child: Text(caliber['name']),
+                        );
+                      }).toList(),
+                      onChanged: (int? value) {
+                        setState(() {
+                          selectedCaliberId = value;
+                        });
+                      },
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Oblíbený'),
+                        Switch(
+                          value: isFavorite,
+                          onChanged: (value) {
+                            setState(() {
+                              isFavorite = value;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () async {
+                    Navigator.pop(dialogContext);
+                    if (selectedCaliberId == null) {
+                      _showMessage('Vyberte prosím kalibr.');
+                      return;
+                    }
+
+                    final cartridgeData = {
+                      'name': nameController.text,
+                      'manufacturer': manufacturerController.text,
+                      'bullet_specification': bulletSpecController.text,
+                      'caliber_id':
+                          selectedCaliberId, // Dynamicky vybraný kalibr
+                      'price': double.tryParse(priceController.text) ?? 0.0,
+                      'stock_quantity': int.tryParse(stockController.text) ?? 0,
+                      'barcode': scannedBarcode,
+                      'is_favorite': isFavorite,
+                    };
+
+                    try {
+                      final response = await ApiService.createFactoryCartridge(
+                          cartridgeData);
+                      _showMessage(
+                          'Nový náboj byl vytvořen: ${response['name']}');
+                    } catch (e) {
+                      _showMessage('Chyba při vytváření náboje: $e');
+                    }
+
+                    await _resetScanner();
+                  },
+                  child: const Text('Vytvořit'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    Navigator.pop(dialogContext);
+                    await _resetScanner();
+                  },
+                  child: const Text('Zrušit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));

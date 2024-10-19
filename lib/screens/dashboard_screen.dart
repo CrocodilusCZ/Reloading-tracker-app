@@ -29,7 +29,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Domovská Stránka'),
+        title: const Text('Shooting Companion'),
         backgroundColor: Colors.blueGrey,
       ),
       body: Column(
@@ -56,7 +56,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 _buildButton(
                   icon: Icons.book,
-                  text: 'Záznam do deníku',
+                  text: 'Sken & spotřeba',
                   color: const Color(0xFF2F4F4F),
                   onPressed: () {
                     Navigator.push(
@@ -84,25 +84,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 16),
                 _buildButton(
                   icon: Icons.inventory_2,
-                  text: 'Náboje',
+                  text: 'Inventář nábojů',
                   color: const Color(0xFF696969),
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) => FutureBuilder(
-                          future: _cartridgesFuture,
+                          future: ApiService
+                              .getAllCartridges(), // Vytváříme nový Future při každém kliknutí
                           builder: (context,
                               AsyncSnapshot<
                                       Map<String, List<Map<String, dynamic>>>>
                                   snapshot) {
                             if (snapshot.connectionState ==
                                 ConnectionState.waiting) {
-                              return const CircularProgressIndicator();
+                              return const Center(
+                                  child: CircularProgressIndicator());
                             } else if (snapshot.hasError) {
-                              return Text('Chyba: ${snapshot.error}');
+                              return Center(
+                                  child: Text('Chyba: ${snapshot.error}'));
                             } else if (!snapshot.hasData) {
-                              return const Text('Žádné náboje nenalezeny.');
+                              return const Center(
+                                  child: Text('Žádné náboje nenalezeny.'));
                             } else {
                               List<Map<String, dynamic>> factoryCartridges =
                                   snapshot.data!['factory']!;
@@ -122,7 +126,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 16),
                 _buildButton(
                   icon: Icons.visibility,
-                  text: 'Zobrazit komponenty',
+                  text: 'Stav skladu komponent',
                   color: const Color(0xFF708090), // Břidlicově šedá
                   onPressed: () {
                     Navigator.push(
