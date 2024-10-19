@@ -316,21 +316,23 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
         "weapon_id": weaponId,
         "cartridge_id": cartridgeId,
         "activity_type": activityType,
-        "shots_fired": shotsFired, // Opravený název pole
-        "date": date, // Opravený název pole
-        "note": note,
+        "shots_fired": shotsFired, // Počet vystřelených nábojů
+        "date": date, // Datum aktivity
+        "note": note, // Poznámka
       });
 
       // Zpracování úspěšné odpovědi
-      if (response.containsKey('success') && response['success'] == true) {
-        print('Záznam ve střeleckém deníku byl úspěšně vytvořen: $response');
+      if (response.containsKey('shooting_log_id')) {
+        print(
+            'Záznam ve střeleckém deníku byl úspěšně vytvořen: ID ${response['shooting_log_id']}');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(
-                  'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}')),
+            content: Text(
+                'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}'),
+          ),
         );
       } else {
-        // Zpracování chyby, například nedostatečná zásoba nábojů
+        // Zpracování chyby, pokud API vrátí jiný výsledek než úspěšné vytvoření
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(response['error'] ?? 'Chyba při ukládání.')),
         );

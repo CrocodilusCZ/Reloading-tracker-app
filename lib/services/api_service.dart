@@ -195,6 +195,34 @@ class ApiService {
     }
   }
 
+  // Vytvoření nového továrního náboje
+  static Future<Map<String, dynamic>> createFactoryCartridge(
+      Map<String, dynamic> cartridgeData) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/cartridges/factory'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
+      },
+      body: jsonEncode(cartridgeData),
+    );
+
+    if (response.statusCode == 201 || response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      print('Error: ${response.body}');
+      throw Exception(
+          'Failed to create factory cartridge: ${response.statusCode}');
+    }
+  }
+
   // Načtení továrních nábojů uživatele
   static Future<List<dynamic>> getFactoryCartridges() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
