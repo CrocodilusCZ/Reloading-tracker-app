@@ -22,21 +22,30 @@ jobs:
       - name: Create build output directory  # Zajistí, že složka existuje
         run: mkdir -p build/ios/ipa
 
-      - name: Build iOS
+      - name: Build iOS with Flutter  # Vytvoøení .app souboru pomocí Flutteru
         run: flutter build ios --no-codesign --release
 
+      - name: Archive the iOS app with Xcode  # Použití Xcode k vytvoøení archivu .xcarchive
+        run: |
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/ios/archive/Runner.xcarchive \
+            clean archive -quiet
+
       - name: Check if archive exists  # Ovìøení existence archivu
-        run: ls -R build/ios/archive
+        run: ls -R build/ios/archive || echo "Archive folder not found!"
 
       - name: Create IPA from archive  # Pøevod archivu na .ipa
         run: |
           xcodebuild -exportArchive \
             -archivePath build/ios/archive/Runner.xcarchive \
             -exportPath build/ios/ipa \
-            -exportOptionsPlist ios/ExportOptions.plist
+            -exportOptionsPlist ios/ExportOptions.plist -verbose
 
       - name: List build directory  # Výpis složek a souborù
-        run: ls -R build/ios
+        run: ls -R build/ios || echo "iOS build folder not found!"
 
       - name: Archive build artifacts  # Nahrání artefaktù
         uses: actions/upload-artifact@v3
