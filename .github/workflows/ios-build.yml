@@ -1,0 +1,24 @@
+name: iOS Build on Demand
+
+on:
+  workflow_dispatch: # Umožní spustit build ruènì z GitHub UI
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS
+        run: flutter build ios --no-codesign
+ 
