@@ -11,15 +11,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'stable'
+          flutter-version: '3.24.1'  # Používá stejnou verzi jako lokálnì
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build iOS
         run: flutter build ios --no-codesign
- 
+
