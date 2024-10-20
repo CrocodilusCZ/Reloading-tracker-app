@@ -19,18 +19,25 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Create build output directory  # Vytvoøení složky
+      - name: Create build output directory
         run: mkdir -p build/ios/ipa
 
       - name: Build iOS
-        run: flutter build ipa --no-codesign
+        run: flutter build ios --no-codesign
 
-      - name: List all build directories  # Výpis všech složek pod build/
-        run: ls -R build
+      - name: Create IPA from archive  # Pøidání kroku pro pøevod na .ipa
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/ios/archive/Runner.xcarchive \
+            -exportPath build/ios/ipa \
+            -exportOptionsPlist ios/ExportOptions.plist
+
+      - name: List build directory
+        run: ls -R build/ios
 
       - name: Archive build artifacts
         uses: actions/upload-artifact@v3
         with:
           name: iOS-App
-          path: build/ios/ipa/*.ipa  # Cesta k výslednému .ipa souboru
+          path: build/ios/ipa/*.ipa
 
