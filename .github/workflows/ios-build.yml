@@ -23,7 +23,7 @@ jobs:
         run: flutter build ios --no-codesign
 
       - name: Archive build artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3  # Aktualizováno na v3
         with:
           name: iOS-App
           path: build/ios/ipa/*.ipa  # Cesta k výslednému .ipa souboru
