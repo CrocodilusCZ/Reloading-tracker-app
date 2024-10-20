@@ -19,11 +19,14 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Create build output directory  # Vytvoøení složky
+        run: mkdir -p build/ios/ipa
+
       - name: Build iOS
         run: flutter build ipa --no-codesign
 
       - name: List build directory  # Pøidáno pro kontrolu obsahu složky
-        run: ls -R build/ios/ipa
+        run: ls -R build/ios
 
       - name: Archive build artifacts
         uses: actions/upload-artifact@v3  # Použití nejnovìjší verze
