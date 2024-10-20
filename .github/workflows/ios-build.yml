@@ -22,3 +22,9 @@ jobs:
       - name: Build iOS
         run: flutter build ios --no-codesign
 
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: iOS-App
+          path: build/ios/ipa/*.ipa  # Cesta k výslednému .ipa souboru
+

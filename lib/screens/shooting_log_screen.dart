@@ -55,22 +55,39 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   Future<void> _fetchCartridgeInfo(String code) async {
     try {
       final response = await ApiService.checkBarcode(code); // Volání API služby
-      setState(() {
-        cartridgeData = response; // Uložení celého objektu pro pozdější použití
-        cartridgeInfo = 'Náboj: ${response['cartridge']['name']}, '
-            'Kalibr: ${response['cartridge']['caliber']['name']}';
-      });
 
-      // Zavibrujte po úspěšném načtení dat
-      if (await Vibration.hasVibrator() ?? false) {
-        Vibration.vibrate(duration: 200); // Vibrace na 200 ms
+      // Ověření, zda odpověď obsahuje požadované informace
+      if (response.containsKey('cartridge') && response['cartridge'] != null) {
+        final cartridge = response['cartridge'];
+        final caliber = cartridge['caliber'];
+
+        setState(() {
+          cartridgeData = response;
+          cartridgeInfo = 'Náboj: ${cartridge['name'] ?? 'Neznámý'}, '
+              'Kalibr: ${caliber?['name'] ?? 'Neznámý'}';
+        });
+
+        // Zavibrujte po úspěšném načtení dat
+        if (await Vibration.hasVibrator() ?? false) {
+          Vibration.vibrate(duration: 200); // Vibrace na 200 ms
+        }
+
+        // Načtení zbraní odpovídajících kalibru, pokud kalibr existuje
+        if (caliber != null && caliber['id'] != null) {
+          _fetchUserWeapons(caliber['id']);
+        }
+      } else {
+        // Pokud není náboj v systému zaveden, zobrazí se uživatelsky přívětivější zpráva
+        setState(() {
+          cartridgeInfo =
+              'Náboj s tímto čárovým kódem není v systému zaveden. Začněte prosím přiřazením kódu k náboji v "Sken&Navýšení Skladu"';
+        });
+        controller?.resumeCamera(); // Obnovení kamery při chybě
       }
-
-      // Načtení zbraní odpovídajících kalibru
-      _fetchUserWeapons(response['cartridge']['caliber']['id']);
     } catch (e) {
       setState(() {
-        cartridgeInfo = 'Chyba při načítání náboje: $e'; // Zobrazení chyby
+        cartridgeInfo =
+            'Chyba při načítání náboje. Zkontrolujte prosím připojení a zkuste to znovu.'; // Zobrazení přívětivější chyby
       });
       controller?.resumeCamera(); // Obnovení kamery při chybě
     }
@@ -363,10 +380,16 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
           Expanded(
             flex: 1,
             child: Center(
-              child: Text(
-                scannedCode != null
-                    ? (cartridgeInfo ?? 'Načítám informace o náboji...')
-                    : 'Naskenujte QR kód',
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16.0), // Přidání paddingu po stranách
+                child: Text(
+                  scannedCode != null
+                      ? (cartridgeInfo ?? 'Načítám informace o náboji...')
+                      : 'Naskenujte QR kód',
+                  textAlign: TextAlign.center, // Zarovnání textu na střed
+                  style: TextStyle(fontSize: 16), // Nastavení velikosti písma
+                ),
               ),
             ),
           ),
