@@ -25,11 +25,11 @@ jobs:
       - name: Build iOS
         run: flutter build ipa --no-codesign
 
-      - name: List build directory  # Pøidáno pro kontrolu obsahu složky
-        run: ls -R build/ios
+      - name: List all build directories  # Výpis všech složek pod build/
+        run: ls -R build
 
       - name: Archive build artifacts
-        uses: actions/upload-artifact@v3  # Použití nejnovìjší verze
+        uses: actions/upload-artifact@v3
         with:
           name: iOS-App
           path: build/ios/ipa/*.ipa  # Cesta k výslednému .ipa souboru
