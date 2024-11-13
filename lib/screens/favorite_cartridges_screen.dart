@@ -18,6 +18,7 @@ class FavoriteCartridgesScreen extends StatefulWidget {
 
 class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   bool _showFactoryCartridges = true;
+  bool _showZeroStock = false;
   String? selectedCaliber;
   List<String> calibers = []; // Seznam kalibrů pro filtr
 
@@ -77,6 +78,25 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
             ),
           ),
 
+          // Tlačítko pro zobrazení/skrytí nábojů s nulovou dostupností
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Zobrazit náboje s nulovou dostupností'),
+                Switch(
+                  value: _showZeroStock,
+                  onChanged: (value) {
+                    setState(() {
+                      _showZeroStock = value;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+
           // Dropdown pro výběr kalibru
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
@@ -111,12 +131,23 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
 
   List<Map<String, dynamic>> _filterByCaliber(
       List<Map<String, dynamic>> cartridges) {
-    if (selectedCaliber == null || selectedCaliber == "Vše") {
-      return cartridges; // Pokud není vybrán žádný kalibr nebo je vybráno "Vše", vrátíme všechny náboje
+    var filtered = cartridges;
+
+    // Filtr kalibru
+    if (selectedCaliber != null && selectedCaliber != "Vše") {
+      filtered = filtered
+          .where((cartridge) => cartridge['caliber']['name'] == selectedCaliber)
+          .toList();
     }
-    return cartridges
-        .where((cartridge) => cartridge['caliber']['name'] == selectedCaliber)
-        .toList();
+
+    // Filtr pro náboje s nulovou dostupností
+    if (!_showZeroStock) {
+      filtered = filtered
+          .where((cartridge) => (cartridge['stock_quantity'] ?? 0) > 0)
+          .toList();
+    }
+
+    return filtered;
   }
 
   Widget _buildCartridgeSection(

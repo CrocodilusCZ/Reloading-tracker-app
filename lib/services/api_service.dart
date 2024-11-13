@@ -219,7 +219,7 @@ class ApiService {
     }
   }
 
-  // Vytvoření nového továrního náboje
+  //vytvoření továrního náboje
   static Future<Map<String, dynamic>> createFactoryCartridge(
       Map<String, dynamic> cartridgeData) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -233,7 +233,9 @@ class ApiService {
       Uri.parse('$baseUrl/cartridges/factory'),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
+        'Accept':
+            'application/json', // Doplněná hlavička pro očekávání JSON odpovědi
+        'Authorization': 'Bearer $token',
       },
       body: jsonEncode(cartridgeData),
     );

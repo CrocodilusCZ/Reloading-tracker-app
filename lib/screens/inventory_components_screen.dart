@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shooting_companion/services/api_service.dart'; // Zajistěte, že máte správnou cestu k vaší API službě
+import 'package:shooting_companion/services/api_service.dart';
 
 class InventoryComponentsScreen extends StatelessWidget {
   const InventoryComponentsScreen({Key? key}) : super(key: key);
@@ -12,8 +12,7 @@ class InventoryComponentsScreen extends StatelessWidget {
         backgroundColor: Colors.blueGrey,
       ),
       body: FutureBuilder<Map<String, dynamic>>(
-        future: ApiService
-            .getInventoryComponents(), // Volání API pro získání komponent
+        future: ApiService.getInventoryComponents(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -25,32 +24,20 @@ class InventoryComponentsScreen extends StatelessWidget {
           }
 
           final data = snapshot.data!;
-          final List<Map<String, dynamic>> bullets =
-              List<Map<String, dynamic>>.from(data['bullets']);
-          final List<Map<String, dynamic>> powders =
-              List<Map<String, dynamic>>.from(data['powders']);
-          final List<Map<String, dynamic>> primers =
-              List<Map<String, dynamic>>.from(data['primers']);
-          final List<Map<String, dynamic>> brasses =
-              List<Map<String, dynamic>>.from(data['brasses']);
-
           return SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildComponentSection(
-                      'Střely', bullets, 'bullets'), // Pro sekci střel
-                  const SizedBox(height: 20),
-                  _buildComponentSection(
-                      'Prachy', powders, 'powders'), // Pro sekci prachů
-                  const SizedBox(height: 20),
-                  _buildComponentSection(
-                      'Zápalky', primers, 'primers'), // Pro sekci zápalek
-                  const SizedBox(height: 20),
-                  _buildComponentSection(
-                      'Nábojnice', brasses, 'brasses'), // Pro sekci nábojnic
+                  _buildCategoryCard(context, 'Střely', data['bullets'],
+                      'bullets', Icons.bolt),
+                  _buildCategoryCard(context, 'Prachy', data['powders'],
+                      'powders', Icons.grain),
+                  _buildCategoryCard(context, 'Zápalky', data['primers'],
+                      'primers', Icons.flash_on),
+                  _buildCategoryCard(context, 'Nábojnice', data['brasses'],
+                      'brasses', Icons.memory),
                 ],
               ),
             ),
@@ -60,8 +47,25 @@ class InventoryComponentsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildComponentSection(
-      String title, List<Map<String, dynamic>> components, String type) {
+  Widget _buildCategoryCard(BuildContext context, String title,
+      List<dynamic> components, String type, IconData icon) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16.0),
+      child: ExpansionTile(
+        leading: Icon(icon, color: Colors.blueGrey),
+        title: Text(title,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: _buildComponentTable(components, type),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildComponentTable(List<dynamic> components, String type) {
     List<DataColumn> columns;
     List<DataRow> rows;
 
@@ -75,31 +79,14 @@ class InventoryComponentsScreen extends StatelessWidget {
           DataColumn(label: Text('Cena (Kč)')),
           DataColumn(label: Text('Skladová Zásoba (ks)')),
         ];
-
-        rows = List.generate(
-          components.length,
-          (index) => DataRow.byIndex(
-            index: index,
-            color: MaterialStateProperty.resolveWith<Color?>(
-              (Set<MaterialState> states) {
-                // Střídání barev pro zebra efekt
-                return index % 2 == 0 ? Colors.grey[200] : null;
-              },
-            ),
-            cells: [
-              DataCell(Text(components[index]['name'] ?? 'Neznámý')),
-              DataCell(Text(
-                  components[index]['weight_grains']?.toString() ?? 'Neznámá')),
-              DataCell(Text(components[index]['manufacturer'] ?? 'Neznámý')),
-              DataCell(Text(components[index]['diameter_inches']?.toString() ??
-                  'Neznámá')),
-              DataCell(
-                  Text(components[index]['price']?.toString() ?? 'Neznámá')),
-              DataCell(Text(components[index]['stock_quantity']?.toString() ??
-                  'Neznámá')),
-            ],
-          ),
-        );
+        rows = _buildRows(components, [
+          'name',
+          'weight_grains',
+          'manufacturer',
+          'diameter_inches',
+          'price',
+          'stock_quantity'
+        ]);
         break;
 
       case 'powders':
@@ -108,25 +95,8 @@ class InventoryComponentsScreen extends StatelessWidget {
           DataColumn(label: Text('Název')),
           DataColumn(label: Text('Skladem gramů')),
         ];
-
-        rows = List.generate(
-          components.length,
-          (index) => DataRow.byIndex(
-            index: index,
-            color: MaterialStateProperty.resolveWith<Color?>(
-              (Set<MaterialState> states) {
-                // Střídání barev pro zebra efekt
-                return index % 2 == 0 ? Colors.grey[200] : null;
-              },
-            ),
-            cells: [
-              DataCell(Text(components[index]['manufacturer'] ?? 'Neznámý')),
-              DataCell(Text(components[index]['name'] ?? 'Neznámý')),
-              DataCell(Text(components[index]['stock_quantity']?.toString() ??
-                  'Neznámá')),
-            ],
-          ),
-        );
+        rows =
+            _buildRows(components, ['manufacturer', 'name', 'stock_quantity']);
         break;
 
       case 'primers':
@@ -136,27 +106,8 @@ class InventoryComponentsScreen extends StatelessWidget {
           DataColumn(label: Text('Cena (Kč)')),
           DataColumn(label: Text('Skladová Zásoba (ks)')),
         ];
-
-        rows = List.generate(
-          components.length,
-          (index) => DataRow.byIndex(
-            index: index,
-            color: MaterialStateProperty.resolveWith<Color?>(
-              (Set<MaterialState> states) {
-                // Střídání barev pro zebra efekt
-                return index % 2 == 0 ? Colors.grey[200] : null;
-              },
-            ),
-            cells: [
-              DataCell(Text(components[index]['categories'] ?? 'Neznámá')),
-              DataCell(Text(components[index]['name'] ?? 'Neznámý')),
-              DataCell(
-                  Text(components[index]['price']?.toString() ?? 'Neznámá')),
-              DataCell(Text(components[index]['stock_quantity']?.toString() ??
-                  'Neznámá')),
-            ],
-          ),
-        );
+        rows = _buildRows(
+            components, ['categories', 'name', 'price', 'stock_quantity']);
         break;
 
       case 'brasses':
@@ -165,26 +116,8 @@ class InventoryComponentsScreen extends StatelessWidget {
           DataColumn(label: Text('Název')),
           DataColumn(label: Text('Skladová Zásoba (ks)')),
         ];
-
-        rows = List.generate(
-          components.length,
-          (index) => DataRow.byIndex(
-            index: index,
-            color: MaterialStateProperty.resolveWith<Color?>(
-              (Set<MaterialState> states) {
-                // Střídání barev pro zebra efekt
-                return index % 2 == 0 ? Colors.grey[200] : null;
-              },
-            ),
-            cells: [
-              DataCell(
-                  Text(components[index]['caliber']?['name'] ?? 'Neznámý')),
-              DataCell(Text(components[index]['name'] ?? 'Neznámý')),
-              DataCell(Text(components[index]['stock_quantity']?.toString() ??
-                  'Neznámá')),
-            ],
-          ),
-        );
+        rows =
+            _buildRows(components, ['caliber.name', 'name', 'stock_quantity']);
         break;
 
       default:
@@ -192,24 +125,54 @@ class InventoryComponentsScreen extends StatelessWidget {
         rows = [];
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 10),
-        components.isEmpty
-            ? const Text('Nenalezeny žádné položky.')
-            : SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: columns,
-                  rows: rows,
-                ),
-              ),
-      ],
+    return components.isEmpty
+        ? const Padding(
+            padding: EdgeInsets.all(8.0),
+            child: Text('Nenalezeny žádné položky.',
+                style: TextStyle(color: Colors.grey)),
+          )
+        : SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columns: columns,
+              rows: rows,
+              columnSpacing: 12,
+            ),
+          );
+  }
+
+  List<DataRow> _buildRows(List<dynamic> components, List<String> fields) {
+    return List.generate(
+      components.length,
+      (index) {
+        final Map<String, dynamic> component =
+            components[index] as Map<String, dynamic>;
+        return DataRow.byIndex(
+          index: index,
+          color: MaterialStateProperty.resolveWith<Color?>(
+            (Set<MaterialState> states) =>
+                index % 2 == 0 ? Colors.grey[200] : null,
+          ),
+          cells: fields.map((field) {
+            final value = _resolveNestedField(component, field.split('.'));
+            return DataCell(
+              Text(value?.toString() ?? 'Neznámá'),
+            );
+          }).toList(),
+        );
+      },
     );
+  }
+
+  dynamic _resolveNestedField(Map<String, dynamic> map, List<String> fields) {
+    var current = map;
+    for (var field in fields) {
+      if (current[field] is Map<String, dynamic>) {
+        current = current[field];
+      } else {
+        return current[field]; // vrátí hodnotu, pokud není další úroveň mapy
+      }
+    }
+    return current;
   }
 }
