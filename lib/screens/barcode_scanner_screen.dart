@@ -65,11 +65,15 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
           ? response['cartridge']['caliber']['name']
           : 'Neznámý kalibr';
 
+      int packageSize =
+          response['cartridge']['package_size'] ?? 0; // Získáme `package_size`
+
       await _showIncreaseStockDialog(
           scannedBarcode,
           response['cartridge']['name'],
           response['cartridge']['manufacturer'] ?? 'Neznámý výrobce',
-          caliberName);
+          caliberName,
+          packageSize); // Předáme `packageSize` do dialogu
     } else {
       setState(() {
         barcodeStatus = 'Čárový kód není přiřazen.';
@@ -78,10 +82,18 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     }
   }
 
-  Future<void> _showIncreaseStockDialog(String scannedBarcode,
-      String cartridgeName, String manufacturerName, String caliber) async {
-    int quantity = 0;
-    final TextEditingController quantityController = TextEditingController();
+  Future<void> _showIncreaseStockDialog(
+      String scannedBarcode,
+      String cartridgeName,
+      String manufacturerName,
+      String caliber,
+      int packageSize) async {
+    // Přidáme `packageSize` jako parametr
+
+    final TextEditingController quantityController = TextEditingController(
+        text: packageSize > 0
+            ? packageSize.toString()
+            : ''); // Předvyplníme `packageSize`
 
     await showDialog(
       context: context,
@@ -97,7 +109,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
           actions: <Widget>[
             TextButton(
               onPressed: () async {
-                quantity = int.tryParse(quantityController.text) ?? 0;
+                int quantity = int.tryParse(quantityController.text) ?? 0;
                 Navigator.pop(dialogContext);
                 if (quantity > 0) {
                   try {
@@ -318,6 +330,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     final TextEditingController bulletSpecController = TextEditingController();
     final TextEditingController priceController = TextEditingController();
     final TextEditingController stockController = TextEditingController();
+    final TextEditingController packageSizeController = TextEditingController();
     bool isFavorite = false;
     int? selectedCaliberId;
 
@@ -362,19 +375,61 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                       decoration:
                           const InputDecoration(labelText: 'Skladová zásoba'),
                     ),
-                    DropdownButtonFormField<int>(
+                    TextField(
+                      controller:
+                          packageSizeController, // Přidáno pro prodejní balení
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                          labelText: 'Velikost prodejního balení'),
+                    ),
+                    TextFormField(
+                      controller: TextEditingController(
+                          text: selectedCaliberId != null
+                              ? calibers.firstWhere((caliber) =>
+                                  caliber['id'] == selectedCaliberId)['name']
+                              : "Vyberte kalibr"),
+                      readOnly: true,
                       decoration: const InputDecoration(labelText: 'Kalibr'),
-                      value: selectedCaliberId,
-                      items: calibers.map<DropdownMenuItem<int>>((caliber) {
-                        return DropdownMenuItem<int>(
-                          value: caliber['id'],
-                          child: Text(caliber['name']),
+                      onTap: () async {
+                        // Otevřít dialog s výběrem kalibrů
+                        await showDialog(
+                          context: context,
+                          builder: (BuildContext dialogContext) {
+                            return AlertDialog(
+                              title: const Text('Vyberte kalibr'),
+                              content: SizedBox(
+                                width: double.maxFinite,
+                                child: Scrollbar(
+                                  thumbVisibility: true,
+                                  child: ListView.builder(
+                                    shrinkWrap: true,
+                                    itemCount: calibers.length,
+                                    itemBuilder: (context, index) {
+                                      final caliber = calibers[index];
+                                      return ListTile(
+                                        title: Text(caliber['name']),
+                                        onTap: () {
+                                          setState(() {
+                                            selectedCaliberId = caliber['id'];
+                                          });
+                                          Navigator.pop(dialogContext);
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                              actions: <Widget>[
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.pop(dialogContext);
+                                  },
+                                  child: const Text('Zrušit'),
+                                ),
+                              ],
+                            );
+                          },
                         );
-                      }).toList(),
-                      onChanged: (int? value) {
-                        setState(() {
-                          selectedCaliberId = value;
-                        });
                       },
                     ),
                     Row(
@@ -411,6 +466,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                           selectedCaliberId, // Dynamicky vybraný kalibr
                       'price': double.tryParse(priceController.text) ?? 0.0,
                       'stock_quantity': int.tryParse(stockController.text) ?? 0,
+                      'package_size':
+                          int.tryParse(packageSizeController.text) ?? 1,
                       'barcode': scannedBarcode,
                       'is_favorite': isFavorite,
                     };

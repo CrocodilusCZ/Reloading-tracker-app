@@ -38,13 +38,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
             padding: const EdgeInsets.all(16.0),
             child: Align(
               alignment: Alignment.topLeft,
-              child: Text(
-                'Uživatel: ${widget.username}',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                    ),
+              child: Column(
+                // Přidán Column widget pro zarovnání dvou textů vertikálně
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Uživatel: ${widget.username}',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Verze aplikace: Shooting_companion_0.8',
+                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                  ),
+                ],
               ),
             ),
           ),
@@ -91,8 +102,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (context) => FutureBuilder(
-                          future: ApiService
-                              .getAllCartridges(), // Vytváříme nový Future při každém kliknutí
+                          future: ApiService.getAllCartridges(),
                           builder: (context,
                               AsyncSnapshot<
                                       Map<String, List<Map<String, dynamic>>>>
@@ -127,13 +137,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _buildButton(
                   icon: Icons.visibility,
                   text: 'Stav skladu komponent',
-                  color: const Color(0xFF708090), // Břidlicově šedá
+                  color: const Color(0xFF708090),
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) =>
-                            const InventoryComponentsScreen(), // Přesměrování na obrazovku komponent
+                        builder: (context) => const InventoryComponentsScreen(),
                       ),
                     );
                   },

@@ -54,67 +54,112 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
       ),
       body: Column(
         children: [
-          // Přepínač mezi továrními a přebíjenými náboji
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: ToggleButtons(
-              isSelected: [_showFactoryCartridges, !_showFactoryCartridges],
-              onPressed: (index) {
-                setState(() {
-                  _showFactoryCartridges = index == 0;
-                  _updateCalibers(); // Aktualizace kalibrů při změně záložky
-                });
-              },
-              children: const [
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text('Tovární náboje'),
-                ),
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text('Přebíjené náboje'),
-                ),
-              ],
-            ),
-          ),
-
-          // Tlačítko pro zobrazení/skrytí nábojů s nulovou dostupností
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Zobrazit náboje s nulovou dostupností'),
-                Switch(
-                  value: _showZeroStock,
-                  onChanged: (value) {
-                    setState(() {
-                      _showZeroStock = value;
-                    });
-                  },
-                ),
-              ],
-            ),
-          ),
-
-          // Dropdown pro výběr kalibru
+          // Sekce filtrů v jednotlivých blocích
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-            child: DropdownButton<String>(
-              value: selectedCaliber,
-              hint: const Text("Vyberte kalibr"),
-              onChanged: (String? newValue) {
-                setState(() {
-                  selectedCaliber = newValue;
-                });
-              },
-              isExpanded: true,
-              items: calibers
-                  .map((caliber) => DropdownMenuItem<String>(
-                        value: caliber,
-                        child: Text(caliber),
-                      ))
-                  .toList(),
+            child: Column(
+              children: [
+                // Blok: Přepínač mezi továrními a přebíjenými náboji
+                Card(
+                  elevation: 3,
+                  color: Colors.grey.shade200,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Center(
+                      child: ToggleButtons(
+                        borderRadius: BorderRadius.circular(10),
+                        selectedColor: Colors.white,
+                        fillColor: Colors.blueGrey,
+                        color: Colors.blueGrey,
+                        isSelected: [
+                          _showFactoryCartridges,
+                          !_showFactoryCartridges
+                        ],
+                        onPressed: (index) {
+                          setState(() {
+                            _showFactoryCartridges = index == 0;
+                            _updateCalibers(); // Aktualizace kalibrů při změně záložky
+                          });
+                        },
+                        children: const [
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: Text(
+                              'Tovární náboje',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: Text(
+                              'Přebíjené náboje',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Blok: Přepínač pro zobrazení/skrytí nábojů s nulovou dostupností
+                Card(
+                  elevation: 3,
+                  color: Colors.grey.shade200,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Zobrazit s nulovou dostupností',
+                          style: TextStyle(fontSize: 16),
+                        ),
+                        Switch(
+                          value: _showZeroStock,
+                          activeColor: Colors.blueGrey,
+                          onChanged: (value) {
+                            setState(() {
+                              _showZeroStock = value;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Blok: Dropdown pro výběr kalibru
+                Card(
+                  elevation: 3,
+                  color: Colors.grey.shade200,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: DropdownButton<String>(
+                      value: selectedCaliber,
+                      icon: const Icon(Icons.arrow_drop_down),
+                      hint: const Text("Vyberte kalibr"),
+                      onChanged: (String? newValue) {
+                        setState(() {
+                          selectedCaliber = newValue;
+                        });
+                      },
+                      isExpanded: true,
+                      items: calibers
+                          .map((caliber) => DropdownMenuItem<String>(
+                                value: caliber,
+                                child: Text(
+                                  caliber,
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                              ))
+                          .toList(),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -176,9 +221,9 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
               style: const TextStyle(fontSize: 16),
             ),
             trailing: const Icon(Icons.arrow_forward),
-            onTap: () {
-              // Otevření detailní obrazovky pro daný náboj
-              Navigator.push(
+            onTap: () async {
+              // Otevření detailní obrazovky pro daný náboj s čekáním na návrat aktualizovaných dat
+              final updatedCartridge = await Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => CartridgeDetailScreen(
@@ -186,6 +231,18 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
                   ),
                 ),
               );
+
+              // Aktualizace skladových dat po návratu
+              if (updatedCartridge != null) {
+                setState(() {
+                  // Najdeme původní položku a aktualizujeme její data
+                  final index = cartridges.indexWhere(
+                      (item) => item['id'] == updatedCartridge['id']);
+                  if (index != -1) {
+                    cartridges[index] = updatedCartridge;
+                  }
+                });
+              }
             },
           ),
         );
@@ -550,6 +607,14 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
               content: Text(
                   'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}')),
         );
+
+        // Aktualizace skladové dostupnosti cartridge
+        final updatedCartridge = Map<String, dynamic>.from(widget.cartridge);
+        updatedCartridge['stock_quantity'] =
+            (updatedCartridge['stock_quantity'] ?? 0) - shotsFired;
+
+        // Navrácení na předchozí obrazovku s aktualizovanými daty
+        Navigator.pop(context, updatedCartridge);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(response['error'] ?? 'Chyba při ukládání.')),
