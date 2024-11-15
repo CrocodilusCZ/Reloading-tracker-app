@@ -25,6 +25,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   String? selectedRange; // Přidána proměnná pro aktuální výběr střelnice
   String? dialogSelectedRange; // Lokální proměnná pro dialog
   bool isLoading = false; // Přidána proměnná isLoading pro sledování načítání
+  bool isRangeInitialized = false; // Sleduje, zda je střelnice inicializována
 
   @override
   void initState() {
@@ -107,69 +108,53 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
 
   Future<void> _fetchUserRangesAndSelectNearest() async {
     try {
-      // Získání seznamu střelnic
-      final rangesResponse = await ApiService.getUserRanges();
-      print('Načtené střelnice z API: $rangesResponse');
-
-      // Ověření, zda je odpověď validní
-      if (rangesResponse == null || rangesResponse.isEmpty) {
-        print('Střelnice nebyly nalezeny.');
-        return;
-      }
-
-      // Načtení aktuální polohy uživatele
       final position = await _getCurrentLocation();
-      final double userLat = position.latitude;
-      final double userLon = position.longitude;
+      final rangesResponse = await ApiService.getUserRanges();
 
-      print('Aktuální poloha uživatele: Lat=$userLat, Lon=$userLon');
+      if (rangesResponse != null && rangesResponse.isNotEmpty) {
+        final nearestRange = _getNearestRange(
+          rangesResponse,
+          position.latitude,
+          position.longitude,
+        );
 
-      // Výběr nejbližší střelnice
-      final String? nearestRange =
-          _getNearestRange(rangesResponse, userLat, userLon);
-
-      print('Nejbližší střelnice po výpočtu: $nearestRange');
-
-      // Nastavení výběru střelnice
-      setState(() {
-        userRanges = rangesResponse;
-        selectedRange = nearestRange; // Předvybraná střelnice
-      });
-
-      // Debug pro ověření stavu po nastavení
-      print('Stav po setState:');
-      print(' - userRanges: $userRanges');
-      print(' - selectedRange: $selectedRange');
+        setState(() {
+          userRanges = rangesResponse;
+          selectedRange = nearestRange;
+          isRangeInitialized = true;
+        });
+      } else {
+        print('Střelnice nebyly nalezeny.');
+      }
     } catch (e) {
       print('Chyba při načítání střelnic nebo polohy: $e');
     }
   }
 
   Future<Position> _getCurrentLocation() async {
-    // Získání aktuální pozice
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      return Future.error('Služba určování polohy je zakázaná.');
-    }
-
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        return Future.error('Přístup k poloze byl odepřen.');
+    try {
+      final isServiceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!isServiceEnabled) {
+        throw 'Služba určování polohy je zakázaná.';
       }
-    }
 
-    if (permission == LocationPermission.deniedForever) {
-      return Future.error('Přístup k poloze je trvale zakázán.');
-    }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
 
-    // Vrátí aktuální pozici
-    return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high);
+      if (permission == LocationPermission.deniedForever ||
+          permission == LocationPermission.denied) {
+        throw 'Přístup k poloze je zakázán.';
+      }
+
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+    } catch (e) {
+      print('Chyba při získávání polohy: $e');
+      rethrow;
+    }
   }
 
   // Volání API pro zjištění informací o náboji
@@ -345,6 +330,19 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   }
 
   void _showShootingLogForm(int weaponId) async {
+    if (!isRangeInitialized) {
+      await _fetchUserRangesAndSelectNearest();
+    }
+
+    if (!isRangeInitialized) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Načítám data střelnice, zkuste to prosím za chvíli.'),
+        ),
+      );
+      return;
+    }
+
     // Debugovací výstup pro kontrolu dostupných střelnic
     print('Před zobrazením formuláře - dostupné střelnice: $userRanges');
 
@@ -558,33 +556,36 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       appBar: AppBar(
         title: const Text('Identifikace náboje'),
       ),
-      body: Column(
-        children: <Widget>[
-          Expanded(
-            flex: 4,
-            child: QRView(
-              key: qrKey,
-              onQRViewCreated: _onQRViewCreated,
-            ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16.0), // Přidání paddingu po stranách
-                child: Text(
-                  scannedCode != null
-                      ? (cartridgeInfo ?? 'Načítám informace o náboji...')
-                      : 'Naskenujte QR kód',
-                  textAlign: TextAlign.center, // Zarovnání textu na střed
-                  style: TextStyle(fontSize: 16), // Nastavení velikosti písma
+      body: isRangeInitialized
+          ? Column(
+              children: <Widget>[
+                Expanded(
+                  flex: 4,
+                  child: QRView(
+                    key: qrKey,
+                    onQRViewCreated: _onQRViewCreated,
+                  ),
                 ),
-              ),
+                Expanded(
+                  flex: 1,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: Text(
+                        scannedCode != null
+                            ? (cartridgeInfo ?? 'Načítám informace o náboji...')
+                            : 'Naskenujte QR kód',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : Center(
+              child: CircularProgressIndicator(), // Indikátor načítání
             ),
-          ),
-        ],
-      ),
     );
   }
 }

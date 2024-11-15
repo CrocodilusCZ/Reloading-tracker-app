@@ -17,46 +17,90 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   late Future<Map<String, List<Map<String, dynamic>>>> _cartridgesFuture;
   bool _showFactoryCartridges = false;
+  bool isRangeInitialized = false;
 
   @override
   void initState() {
     super.initState();
     // Načtení všech nábojů najednou
     _cartridgesFuture = ApiService.getAllCartridges();
+
+    // Simulace načítání střelnic a nastavení `isRangeInitialized`
+    Future.delayed(const Duration(seconds: 2), () async {
+      try {
+        // Zavolej funkci pro načtení střelnic (nahraď `fetchRanges` reálnou implementací)
+        final ranges = await ApiService.getUserRanges();
+        if (ranges.isNotEmpty) {
+          setState(() {
+            isRangeInitialized = true; // Nastavení na true po úspěšném načtení
+          });
+        } else {
+          print('Střelnice nebyly nalezeny.');
+        }
+      } catch (e) {
+        print('Chyba při načítání střelnic: $e');
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Shooting Companion'),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.center, // Zarovnání na střed
+          mainAxisSize: MainAxisSize.min, // Přizpůsobení velikosti obsahu
+          children: const [
+            Icon(
+              Icons.track_changes, // Ikona terče
+              size: 28, // Velikost ikony
+              color: Colors.white, // Barva ikony
+            ),
+            SizedBox(width: 8), // Mezera mezi ikonou a textem
+            Text(
+              'Shooting Companion',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
         backgroundColor: Colors.blueGrey,
+        centerTitle: true, // Zachování na střed i v rámci AppBar
       ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: Column(
-                // Přidán Column widget pro zarovnání dvou textů vertikálně
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Uživatel: ${widget.username}',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                        ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Verze aplikace: Shooting_companion_0.9',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
-                  ),
-                ],
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.person,
+                        size: 28, color: Colors.blueGrey), // Ikona panáčka
+                    const SizedBox(width: 8), // Mezera mezi ikonou a textem
+                    Text(
+                      widget.username,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4), // Mezera mezi řádky
+                Text(
+                  'Verze aplikace: Shooting_companion_0.9', // Text na dalším řádku
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontSize: 16,
+                        color: Colors.grey,
+                      ),
+                ),
+              ],
             ),
           ),
           const Spacer(),
@@ -67,16 +111,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 _buildButton(
                   icon: Icons.book,
-                  text: 'Sken & spotřeba',
+                  text: isRangeInitialized
+                      ? 'Sken & spotřeba'
+                      : 'Načítání střelnic...',
                   color: const Color(0xFF2F4F4F),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const ShootingLogScreen(),
-                      ),
-                    );
-                  },
+                  onPressed: isRangeInitialized
+                      ? () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const ShootingLogScreen(),
+                            ),
+                          );
+                        }
+                      : null, // Deaktivace tlačítka, pokud střelnice nejsou inicializovány
                 ),
                 const SizedBox(height: 16),
                 _buildButton(
@@ -160,13 +208,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required IconData icon,
     required String text,
     required Color color,
-    required VoidCallback onPressed,
+    VoidCallback? onPressed, // Povolení nullable
   }) {
     return SizedBox(
       width: 300,
       height: 50,
       child: ElevatedButton(
-        onPressed: onPressed,
+        onPressed: onPressed, // Akceptuje null
         style: ElevatedButton.styleFrom(
           backgroundColor: color,
           shape: RoundedRectangleBorder(
