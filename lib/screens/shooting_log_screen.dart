@@ -108,15 +108,35 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
 
   Future<void> _fetchUserRangesAndSelectNearest() async {
     try {
-      final position = await _getCurrentLocation();
+      // Načti seznam střelnic z API
       final rangesResponse = await ApiService.getUserRanges();
 
       if (rangesResponse != null && rangesResponse.isNotEmpty) {
-        final nearestRange = _getNearestRange(
-          rangesResponse,
-          position.latitude,
-          position.longitude,
-        );
+        Position? position;
+
+        try {
+          // Zkus získat aktuální polohu
+          position = await _getCurrentLocation();
+        } catch (e) {
+          print('Chyba při získávání polohy: $e');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Nepodařilo se získat polohu. Ruční výběr střelnice je k dispozici.',
+              ),
+            ),
+          );
+        }
+
+        // Pokud byla získána poloha, najdi nejbližší střelnici
+        String? nearestRange;
+        if (position != null) {
+          nearestRange = _getNearestRange(
+            rangesResponse,
+            position.latitude,
+            position.longitude,
+          );
+        }
 
         setState(() {
           userRanges = rangesResponse;
@@ -127,7 +147,15 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
         print('Střelnice nebyly nalezeny.');
       }
     } catch (e) {
-      print('Chyba při načítání střelnic nebo polohy: $e');
+      print('Chyba při načítání střelnic: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Nepodařilo se načíst střelnice.'),
+        ),
+      );
+      setState(() {
+        isRangeInitialized = true;
+      });
     }
   }
 
@@ -153,7 +181,17 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       );
     } catch (e) {
       print('Chyba při získávání polohy: $e');
-      rethrow;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Nepodařilo se získat polohu. Zkontrolujte nastavení polohy a oprávnění aplikace.',
+          ),
+        ),
+      );
+
+      // Pokud je třeba, můžeš zde vrátit výchozí hodnotu nebo explicitní chybu
+      return Future.error('Nepodařilo se získat polohu.');
     }
   }
 
@@ -413,11 +451,14 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                                 child: Text(range['name']),
                               );
                             }).toList()
-                          : null,
+                          : [
+                              DropdownMenuItem(
+                                  value: null,
+                                  child: Text('Žádné dostupné střelnice'))
+                            ],
                       onChanged: (value) {
                         setState(() {
-                          dialogSelectedRange =
-                              value; // Lokální aktualizace výběru
+                          dialogSelectedRange = value;
                         });
                       },
                     ),
@@ -464,8 +505,9 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                         dialogSelectedRange != null &&
                         dateController.text.isNotEmpty) {
                       setState(() {
-                        selectedRange =
-                            dialogSelectedRange; // Aktualizace stavu
+                        selectedRange = null; // Nebyla vybrána žádná střelnice
+                        isRangeInitialized =
+                            true; // Nastav jako inicializované, aby se dialog zobrazil
                       });
                       _createShootingLog(
                         weaponId,
