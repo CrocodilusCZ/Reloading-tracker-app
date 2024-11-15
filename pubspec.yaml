@@ -33,6 +33,7 @@ dependencies:
   cupertino_icons: ^1.0.8 # Cupertino Icons font for iOS style icons.
   vibration: ^1.7.6
   flutter_native_splash: ^2.0.4
+  geolocator: ^13.0.2
 
 dev_dependencies:
   flutter_test:

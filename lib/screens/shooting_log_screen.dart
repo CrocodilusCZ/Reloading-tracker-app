@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:geolocator/geolocator.dart';
 import 'dart:io';
 import 'package:shooting_companion/services/api_service.dart'; // Import API služby
 import 'package:vibration/vibration.dart'; // Import balíčku vibration
@@ -49,6 +50,33 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
             scannedCode!); // Volání API pro zjištění informací o náboji
       }
     });
+  }
+
+  Future<Position> _getCurrentLocation() async {
+    // Získání aktuální pozice
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return Future.error('Služba určování polohy je zakázaná.');
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        return Future.error('Přístup k poloze byl odepřen.');
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      return Future.error('Přístup k poloze je trvale zakázán.');
+    }
+
+    // Vrátí aktuální pozici
+    return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high);
   }
 
   // Volání API pro zjištění informací o náboji
@@ -205,12 +233,10 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     });
   }
 
-  // Formulář pro vytvoření nového záznamu ve střeleckém deníku
   void _showShootingLogForm(int weaponId) async {
-    await _fetchUserActivities(); // Čeká na dokončení načítání aktivit
+    await _fetchUserActivities();
 
     if (isLoading) {
-      // Zobrazení načítání, pokud data ještě nejsou načtena
       showDialog(
         context: context,
         builder: (BuildContext context) {
@@ -219,93 +245,111 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
           );
         },
       );
-      return; // Ukončíme zobrazení, dokud nejsou data připravena
+      return;
     }
 
     TextEditingController ammoCountController = TextEditingController();
     TextEditingController noteController = TextEditingController();
-
-    // Získání dnešního data a formátování na 'YYYY-MM-DD'
     String todayDate = DateTime.now().toIso8601String().substring(0, 10);
     TextEditingController dateController =
-        TextEditingController(text: todayDate); // Přednastavené dnešní datum
+        TextEditingController(text: todayDate);
+    String? selectedActivity;
 
-    String? selectedActivity; // Proměnná pro vybranou aktivitu
-
-    controller?.pauseCamera(); // Pauza kamery při otevření dialogu
-
+    // Vytvoříme StatefulBuilder pro aktualizaci stavu uvnitř dialogu
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Vytvoření záznamu ve střeleckém deníku'),
-          content: SingleChildScrollView(
-            child: Column(
-              children: [
-                TextField(
-                  controller: ammoCountController,
-                  decoration:
-                      InputDecoration(labelText: 'Počet vystřelených nábojů'),
-                  keyboardType: TextInputType.number,
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Vytvoření záznamu ve střeleckém deníku'),
+              content: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: ammoCountController,
+                      decoration: InputDecoration(
+                          labelText: 'Počet vystřelených nábojů'),
+                      keyboardType: TextInputType.number,
+                    ),
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(labelText: 'Typ aktivity'),
+                      value: selectedActivity,
+                      items: userActivities
+                          .map<DropdownMenuItem<String>>((activity) {
+                        return DropdownMenuItem<String>(
+                          value: activity['activity_name'],
+                          child: Text(activity['activity_name']),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          selectedActivity = value;
+                        });
+                      },
+                    ),
+                    TextField(
+                      controller: dateController,
+                      decoration:
+                          InputDecoration(labelText: 'Datum (YYYY-MM-DD)'),
+                    ),
+                    TextField(
+                      controller: noteController,
+                      decoration: InputDecoration(labelText: 'Poznámka'),
+                    ),
+                    SizedBox(height: 10),
+                    FutureBuilder<Position>(
+                      future: _getCurrentLocation(),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return Text('Načítám souřadnice...');
+                        } else if (snapshot.hasError) {
+                          return Text(
+                              'Chyba při získávání souřadnic: ${snapshot.error}');
+                        } else if (snapshot.hasData) {
+                          return Text(
+                            'Aktuální poloha: Lat: ${snapshot.data!.latitude}, Lon: ${snapshot.data!.longitude}',
+                            style: TextStyle(color: Colors.grey),
+                          );
+                        }
+                        return Text('Nepodařilo se získat souřadnice');
+                      },
+                    ),
+                  ],
                 ),
-                DropdownButtonFormField<String>(
-                  decoration: InputDecoration(labelText: 'Typ aktivity'),
-                  value: selectedActivity, // Výchozí hodnota
-                  items:
-                      userActivities.map<DropdownMenuItem<String>>((activity) {
-                    return DropdownMenuItem<String>(
-                      value: activity['activity_name'],
-                      child: Text(activity['activity_name']),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedActivity = value; // Uložení vybrané aktivity
-                    });
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Zrušit'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    if (ammoCountController.text.isNotEmpty &&
+                        selectedActivity != null &&
+                        dateController.text.isNotEmpty) {
+                      _createShootingLog(
+                        weaponId,
+                        int.parse(ammoCountController.text),
+                        selectedActivity!,
+                        dateController.text,
+                        noteController.text,
+                      );
+                      Navigator.of(context).pop();
+                    } else {
+                      print('Chyba: Vyplňte všechna povinná pole');
+                    }
                   },
-                ),
-                TextField(
-                  controller: dateController,
-                  decoration: InputDecoration(labelText: 'Datum (YYYY-MM-DD)'),
-                ),
-                TextField(
-                  controller: noteController,
-                  decoration: InputDecoration(labelText: 'Poznámka'),
+                  child: const Text('Uložit'),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(); // Zavřít dialog bez uložení
-              },
-              child: const Text('Zrušit'),
-            ),
-            TextButton(
-              onPressed: () {
-                if (ammoCountController.text.isNotEmpty &&
-                    selectedActivity != null &&
-                    dateController.text.isNotEmpty) {
-                  _createShootingLog(
-                    weaponId,
-                    int.parse(ammoCountController.text),
-                    selectedActivity!, // Použití vybrané aktivity
-                    dateController.text,
-                    noteController.text,
-                  );
-                  Navigator.of(context).pop(); // Zavřít dialog po uložení
-                } else {
-                  print('Chyba: Vyplňte všechna povinná pole');
-                }
-              },
-              child: const Text('Uložit'),
-            ),
-          ],
+            );
+          },
         );
       },
     ).then((_) {
-      controller?.resumeCamera(); // Obnovení kamery po zavření dialogu
+      controller?.resumeCamera();
     });
   }
 
