@@ -52,7 +52,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Verze aplikace: Shooting_companion_0.8',
+                    'Verze aplikace: Shooting_companion_0.9',
                     style: TextStyle(fontSize: 16, color: Colors.grey),
                   ),
                 ],

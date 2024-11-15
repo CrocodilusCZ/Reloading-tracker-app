@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:io';
+import 'dart:math';
 import 'package:shooting_companion/services/api_service.dart'; // Import API služby
 import 'package:vibration/vibration.dart'; // Import balíčku vibration
 
@@ -20,7 +21,17 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   Map<String, dynamic>? cartridgeData; // Proměnná pro uložení dat z API
   List<dynamic> userWeapons = []; // Proměnná pro zbraně uživatele
   List<dynamic> userActivities = []; // Proměnná pro aktivity uživatele
+  List<dynamic> userRanges = []; // Proměnná pro střelnice uživatele
+  String? selectedRange; // Přidána proměnná pro aktuální výběr střelnice
+  String? dialogSelectedRange; // Lokální proměnná pro dialog
   bool isLoading = false; // Přidána proměnná isLoading pro sledování načítání
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchUserRangesAndSelectNearest(); // Načtení střelnic a předvýběr nejbližší
+    dialogSelectedRange = selectedRange; // Přiřazení hodnoty po inicializaci
+  }
 
   @override
   void reassemble() {
@@ -50,6 +61,88 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
             scannedCode!); // Volání API pro zjištění informací o náboji
       }
     });
+  }
+
+  // Funkce pro výpočet vzdálenosti mezi dvěma body podle Haversinovy formule
+  double _calculateDistance(
+      double lat1, double lon1, double lat2, double lon2) {
+    const double earthRadius = 6371; // Poloměr Země v kilometrech
+    final double dLat = (lat2 - lat1) * pi / 180;
+    final double dLon = (lon2 - lon1) * pi / 180;
+
+    final double a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(lat1 * pi / 180) *
+            cos(lat2 * pi / 180) *
+            sin(dLon / 2) *
+            sin(dLon / 2);
+    final double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+
+    return earthRadius * c; // Vzdálenost v kilometrech
+  }
+
+// Funkce pro předvýběr nejbližší střelnice
+  String? _getNearestRange(
+      List<dynamic> ranges, double userLat, double userLon) {
+    double? minDistance;
+    String? nearestRange;
+
+    for (final range in ranges) {
+      final String location = range['location']; // Formát: "lat, lon"
+      final List<String> coords = location.split(',');
+      final double rangeLat = double.parse(coords[0]);
+      final double rangeLon = double.parse(coords[1]);
+
+      final double distance =
+          _calculateDistance(userLat, userLon, rangeLat, rangeLon);
+      if (minDistance == null || distance < minDistance) {
+        minDistance = distance;
+        nearestRange = range['name'];
+      }
+    }
+
+    print(
+        'Nejbližší střelnice: $nearestRange, vzdálenost: ${minDistance ?? 0} km');
+    return nearestRange;
+  }
+
+  Future<void> _fetchUserRangesAndSelectNearest() async {
+    try {
+      // Získání seznamu střelnic
+      final rangesResponse = await ApiService.getUserRanges();
+      print('Načtené střelnice z API: $rangesResponse');
+
+      // Ověření, zda je odpověď validní
+      if (rangesResponse == null || rangesResponse.isEmpty) {
+        print('Střelnice nebyly nalezeny.');
+        return;
+      }
+
+      // Načtení aktuální polohy uživatele
+      final position = await _getCurrentLocation();
+      final double userLat = position.latitude;
+      final double userLon = position.longitude;
+
+      print('Aktuální poloha uživatele: Lat=$userLat, Lon=$userLon');
+
+      // Výběr nejbližší střelnice
+      final String? nearestRange =
+          _getNearestRange(rangesResponse, userLat, userLon);
+
+      print('Nejbližší střelnice po výpočtu: $nearestRange');
+
+      // Nastavení výběru střelnice
+      setState(() {
+        userRanges = rangesResponse;
+        selectedRange = nearestRange; // Předvybraná střelnice
+      });
+
+      // Debug pro ověření stavu po nastavení
+      print('Stav po setState:');
+      print(' - userRanges: $userRanges');
+      print(' - selectedRange: $selectedRange');
+    } catch (e) {
+      print('Chyba při načítání střelnic nebo polohy: $e');
+    }
   }
 
   Future<Position> _getCurrentLocation() async {
@@ -118,6 +211,24 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
             'Chyba při načítání náboje. Zkontrolujte prosím připojení a zkuste to znovu.'; // Zobrazení přívětivější chyby
       });
       controller?.resumeCamera(); // Obnovení kamery při chybě
+    }
+  }
+
+  //Metoda pro načtení střelnic
+  Future<void> _fetchUserRanges() async {
+    try {
+      final rangesResponse = await ApiService.getUserRanges();
+      print('Odpověď z API: $rangesResponse'); // Debug výstup
+      if (rangesResponse is List) {
+        setState(() {
+          userRanges = rangesResponse; // Uložení odpovědi do userRanges
+        });
+        print('Střelnice úspěšně načteny: $userRanges'); // Potvrzení uložení
+      } else {
+        print('Neočekávaný formát odpovědi: $rangesResponse');
+      }
+    } catch (e) {
+      print('Chyba při načítání střelnic: $e');
     }
   }
 
@@ -234,6 +345,12 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   }
 
   void _showShootingLogForm(int weaponId) async {
+    // Debugovací výstup pro kontrolu dostupných střelnic
+    print('Před zobrazením formuláře - dostupné střelnice: $userRanges');
+
+    // Inicializace dialogSelectedRange podle aktuální hodnoty selectedRange
+    dialogSelectedRange = selectedRange;
+
     await _fetchUserActivities();
 
     if (isLoading) {
@@ -288,6 +405,24 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                         });
                       },
                     ),
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(labelText: 'Střelnice'),
+                      value: dialogSelectedRange,
+                      items: userRanges.isNotEmpty
+                          ? userRanges.map<DropdownMenuItem<String>>((range) {
+                              return DropdownMenuItem<String>(
+                                value: range['name'],
+                                child: Text(range['name']),
+                              );
+                            }).toList()
+                          : null,
+                      onChanged: (value) {
+                        setState(() {
+                          dialogSelectedRange =
+                              value; // Lokální aktualizace výběru
+                        });
+                      },
+                    ),
                     TextField(
                       controller: dateController,
                       decoration:
@@ -328,17 +463,26 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                   onPressed: () {
                     if (ammoCountController.text.isNotEmpty &&
                         selectedActivity != null &&
+                        dialogSelectedRange != null &&
                         dateController.text.isNotEmpty) {
+                      setState(() {
+                        selectedRange =
+                            dialogSelectedRange; // Aktualizace stavu
+                      });
                       _createShootingLog(
                         weaponId,
                         int.parse(ammoCountController.text),
                         selectedActivity!,
+                        dialogSelectedRange!,
                         dateController.text,
                         noteController.text,
                       );
                       Navigator.of(context).pop();
                     } else {
-                      print('Chyba: Vyplňte všechna povinná pole');
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text('Vyplňte všechna povinná pole!')),
+                      );
                     }
                   },
                   child: const Text('Uložit'),
@@ -358,6 +502,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     int weaponId,
     int shotsFired,
     String activityType,
+    String rangeName,
     String date,
     String note,
   ) async {
@@ -377,6 +522,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
         "weapon_id": weaponId,
         "cartridge_id": cartridgeId,
         "activity_type": activityType,
+        "range": rangeName,
         "shots_fired": shotsFired, // Počet vystřelených nábojů
         "date": date, // Datum aktivity
         "note": note, // Poznámka

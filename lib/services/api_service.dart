@@ -62,6 +62,31 @@ class ApiService {
     }
   }
 
+  // Načtení seznamu střelnic uživatele
+  static Future<List<dynamic>> getUserRanges() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token'); // Získání tokenu
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/ranges'), // Opravený endpoint
+      headers: {
+        'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
+        'Content-Type': 'application/json',
+      },
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body)
+          as List<dynamic>; // Očekáváme seznam střelnic
+    } else {
+      throw Exception('Chyba při načítání střelnic: ${response.statusCode}');
+    }
+  }
+
   //Funkce pro shooting log
   static Future<Map<String, dynamic>> addShootingLog(String code) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
