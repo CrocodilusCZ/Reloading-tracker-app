@@ -5,12 +5,12 @@ import 'package:shooting_companion/screens/barcode_scanner_screen.dart';
 import 'package:shooting_companion/screens/favorite_cartridges_screen.dart';
 import 'package:shooting_companion/screens/shooting_log_screen.dart';
 import 'package:shooting_companion/screens/inventory_components_screen.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class DashboardScreen extends StatefulWidget {
-  final String username; // Přidání parametru username
+  final String username;
 
-  const DashboardScreen(
-      {super.key, required this.username}); // Konstruktor s username
+  const DashboardScreen({super.key, required this.username});
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
@@ -20,12 +20,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late String username;
   bool isRangeInitialized = false;
   late Future<Map<String, List<Map<String, dynamic>>>> _cartridgesFuture;
+  bool isOnline = true; // Stav připojení
 
   @override
   void initState() {
     super.initState();
-    username = widget.username; // Přiřazení username z widgetu
+    username = widget.username;
     _initializeDashboard();
+
+    // Sleduj změny stavu připojení
+    Connectivity()
+        .onConnectivityChanged
+        .listen((List<ConnectivityResult> results) {
+      // Očekáváme seznam, ale budeme brát první prvek
+      setState(() {
+        isOnline =
+            results.isNotEmpty && results.first != ConnectivityResult.none;
+      });
+    });
   }
 
   Future<void> _initializeDashboard() async {
@@ -59,6 +71,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: Text('Shooting Companion - Vítejte, $username'),
         centerTitle: true,
         backgroundColor: Colors.blueGrey,
+        actions: [
+          // Zobrazení ikony podle stavu připojení
+          Icon(
+            isOnline ? Icons.signal_wifi_4_bar : Icons.signal_wifi_off,
+            color: isOnline ? Colors.green : Colors.red,
+          ),
+          const SizedBox(width: 16),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16.0),
@@ -111,19 +131,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         AsyncSnapshot<Map<String, List<Map<String, dynamic>>>>
                             snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(
-                          child: CircularProgressIndicator(),
-                        );
+                        return const Center(child: CircularProgressIndicator());
                       } else if (snapshot.hasError) {
-                        return Center(
-                          child: Text('Chyba: ${snapshot.error}'),
-                        );
+                        return Center(child: Text('Chyba: ${snapshot.error}'));
                       } else if (!snapshot.hasData ||
                           snapshot.data!['factory']!.isEmpty &&
                               snapshot.data!['reload']!.isEmpty) {
                         return const Center(
-                          child: Text('Žádné náboje nenalezeny.'),
-                        );
+                            child: Text('Žádné náboje nenalezeny.'));
                       } else {
                         return FavoriteCartridgesScreen(
                           factoryCartridges: snapshot.data!['factory']!,
