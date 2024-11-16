@@ -33,6 +33,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   @override
   void initState() {
     super.initState();
+    _checkAndRequestLocationPermission(); // Kontrola a žádost o oprávnění k poloze
     _fetchUserRangesAndSelectNearest(); // Načtení střelnic a předvýběr nejbližší
     dialogSelectedRange = selectedRange; // Přiřazení hodnoty po inicializaci
   }
@@ -150,6 +151,40 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       setState(() {
         isRangeInitialized = true;
       });
+    }
+  }
+
+  Future<void> _checkAndRequestLocationPermission() async {
+    try {
+      final isServiceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!isServiceEnabled) {
+        // Služba polohy není zapnutá
+        throw 'Služba určování polohy je zakázaná. Zapněte ji v nastavení.';
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw 'Oprávnění k poloze bylo zamítnuto.';
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        // Uživatel trvale zakázal oprávnění
+        throw 'Oprávnění k poloze je trvale zakázáno. Upravte to v nastavení.';
+      }
+
+      print('Oprávnění k poloze úspěšně uděleno.');
+    } catch (e) {
+      print('Chyba při kontrole oprávnění k poloze: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString(),
+          ),
+        ),
+      );
     }
   }
 
@@ -661,11 +696,6 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                   onPressed: _toggleFlash, // Metoda pro přepnutí svítilny
                   child:
                       Text(isFlashOn ? 'Vypnout svítilnu' : 'Zapnout svítilnu'),
-                ),
-                // Tlačítko pro simulaci QR kódu
-                ElevatedButton(
-                  onPressed: _simulateQRScan,
-                  child: const Text('Simulovat naskenování QR kódu'),
                 ),
               ],
             ),

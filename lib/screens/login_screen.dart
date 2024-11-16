@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shooting_companion/services/api_service.dart';
-import 'package:shooting_companion/screens/dashboard_screen.dart'; // Správný import pro DashboardScreen
-import 'package:shared_preferences/shared_preferences.dart'; // Import pro shared_preferences
+import 'package:shooting_companion/screens/dashboard_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,12 +15,12 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
-  bool _rememberMe = false; // Pro uložení stavu checkboxu
+  bool _rememberMe = false;
 
   @override
   void initState() {
     super.initState();
-    _loadSavedCredentials(); // Načteme uložené přihlašovací údaje
+    _loadSavedCredentials();
   }
 
   Future<void> _loadSavedCredentials() async {
@@ -49,18 +49,18 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text,
       );
 
-      if (result.containsKey('token')) {
+      if (result.containsKey('token') && result.containsKey('name')) {
         if (_rememberMe) {
-          _saveCredentials(); // Uložíme přihlašovací údaje
+          await _saveCredentials();
         } else {
-          _clearCredentials(); // Vymažeme uložené přihlašovací údaje, pokud checkbox není zaškrtnutý
+          await _clearCredentials();
         }
 
+        final String username = result['name'];
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) =>
-                DashboardScreen(username: _usernameController.text),
+            builder: (context) => DashboardScreen(username: username),
           ),
         );
       } else {

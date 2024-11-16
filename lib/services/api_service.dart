@@ -14,8 +14,7 @@ class ApiService {
     final response = await http.post(
       Uri.parse('$baseUrl/login'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(
-          {'email': email, 'password': password}), // Změněno na 'email'
+      body: jsonEncode({'email': email, 'password': password}),
     );
 
     print('Status Code: ${response.statusCode}');
@@ -24,11 +23,14 @@ class ApiService {
     if (response.statusCode == 200) {
       final responseData = jsonDecode(response.body);
       final token = responseData['token'];
+      final username = responseData['name']; // Extrahuj uživatelské jméno
+
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString('api_token', token);
       await prefs.setString(
-          'user_nickname', responseData['name']); // Ukládáme nick
-      return responseData;
+          'username', username); // Uložení uživatelského jména
+
+      return responseData; // Vrať celou odpověď pro další zpracování
     } else {
       print('Login failed: ${response.body}');
       return {
