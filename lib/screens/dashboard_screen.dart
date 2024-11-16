@@ -28,17 +28,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Simulace načítání střelnic a nastavení `isRangeInitialized`
     Future.delayed(const Duration(seconds: 2), () async {
       try {
-        // Zavolej funkci pro načtení střelnic (nahraď `fetchRanges` reálnou implementací)
         final ranges = await ApiService.getUserRanges();
         if (ranges.isNotEmpty) {
           setState(() {
-            isRangeInitialized = true; // Nastavení na true po úspěšném načtení
+            isRangeInitialized = true; // Střelnice nalezeny
           });
         } else {
-          print('Střelnice nebyly nalezeny.');
+          setState(() {
+            isRangeInitialized = false; // Žádné střelnice nenalezeny
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Nemáte žádné střelnice.')),
+          );
         }
       } catch (e) {
         print('Chyba při načítání střelnic: $e');
+        setState(() {
+          isRangeInitialized = false; // Chyba při načítání
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chyba při načítání střelnic.')),
+        );
       }
     });
   }
@@ -48,15 +58,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Row(
-          mainAxisAlignment: MainAxisAlignment.center, // Zarovnání na střed
-          mainAxisSize: MainAxisSize.min, // Přizpůsobení velikosti obsahu
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: const [
             Icon(
-              Icons.track_changes, // Ikona terče
-              size: 28, // Velikost ikony
-              color: Colors.white, // Barva ikony
+              Icons.track_changes,
+              size: 28,
+              color: Colors.white,
             ),
-            SizedBox(width: 8), // Mezera mezi ikonou a textem
+            SizedBox(width: 8),
             Text(
               'Shooting Companion',
               style: TextStyle(
@@ -68,7 +78,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         backgroundColor: Colors.blueGrey,
-        centerTitle: true, // Zachování na střed i v rámci AppBar
+        centerTitle: true,
       ),
       body: Column(
         children: [
@@ -79,9 +89,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.person,
-                        size: 28, color: Colors.blueGrey), // Ikona panáčka
-                    const SizedBox(width: 8), // Mezera mezi ikonou a textem
+                    const Icon(Icons.person, size: 28, color: Colors.blueGrey),
+                    const SizedBox(width: 8),
                     Text(
                       widget.username,
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
@@ -92,9 +101,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 4), // Mezera mezi řádky
+                const SizedBox(height: 4),
                 Text(
-                  'Verze aplikace: Shooting_companion_0.9', // Text na dalším řádku
+                  'Verze aplikace: Shooting_companion_0.9',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         fontSize: 16,
                         color: Colors.grey,
@@ -111,20 +120,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 _buildButton(
                   icon: Icons.book,
-                  text: isRangeInitialized
-                      ? 'Sken & spotřeba'
-                      : 'Načítání střelnic...',
-                  color: const Color(0xFF2F4F4F),
-                  onPressed: isRangeInitialized
-                      ? () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const ShootingLogScreen(),
-                            ),
-                          );
-                        }
-                      : null, // Deaktivace tlačítka, pokud střelnice nejsou inicializovány
+                  text: 'Střelecký deník',
+                  color: isRangeInitialized
+                      ? const Color(0xFF2F4F4F)
+                      : Colors.grey,
+                  onPressed: () {
+                    if (!isRangeInitialized) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Střelnice nebyly načteny. Pokračujete bez přiřazené střelnice.'),
+                        ),
+                      );
+                    }
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ShootingLogScreen(),
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 16),
                 _buildButton(

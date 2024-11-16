@@ -23,9 +23,12 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   List<dynamic> userActivities = []; // Proměnná pro aktivity uživatele
   List<dynamic> userRanges = []; // Proměnná pro střelnice uživatele
   String? selectedRange; // Přidána proměnná pro aktuální výběr střelnice
-  String? dialogSelectedRange; // Lokální proměnná pro dialog
+  String? dialogSelectedRange = "Bez střelnice";
   bool isLoading = false; // Přidána proměnná isLoading pro sledování načítání
   bool isRangeInitialized = false; // Sleduje, zda je střelnice inicializována
+  bool isFlashOn = false; // Výchozí stav svítilny
+  bool isAmmoError = false; // Indikuje, zda je problém s počtem nábojů
+  String? errorMessage; // Pro ukládání chybové zprávy
 
   @override
   void initState() {
@@ -88,16 +91,28 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     String? nearestRange;
 
     for (final range in ranges) {
-      final String location = range['location']; // Formát: "lat, lon"
-      final List<String> coords = location.split(',');
-      final double rangeLat = double.parse(coords[0]);
-      final double rangeLon = double.parse(coords[1]);
+      final String location = range['location'];
+      try {
+        // Parsování souřadnic střelnice
+        final List<String> coords = location.split(',');
+        final double rangeLat = double.parse(coords[0].trim());
+        final double rangeLon = double.parse(coords[1].trim());
 
-      final double distance =
-          _calculateDistance(userLat, userLon, rangeLat, rangeLon);
-      if (minDistance == null || distance < minDistance) {
-        minDistance = distance;
-        nearestRange = range['name'];
+        print('Souřadnice střelnice: $rangeLat, $rangeLon');
+
+        // Výpočet vzdálenosti
+        final double distance =
+            _calculateDistance(userLat, userLon, rangeLat, rangeLon);
+
+        print('Vzdálenost ke střelnici "${range['name']}": $distance km');
+
+        // Aktualizace nejbližší střelnice
+        if (minDistance == null || distance < minDistance) {
+          minDistance = distance;
+          nearestRange = range['name'];
+        }
+      } catch (e) {
+        print('Chyba při parsování souřadnic střelnice: $e, data: $location');
       }
     }
 
@@ -108,51 +123,30 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
 
   Future<void> _fetchUserRangesAndSelectNearest() async {
     try {
-      // Načti seznam střelnic z API
       final rangesResponse = await ApiService.getUserRanges();
+      setState(() {
+        userRanges = rangesResponse ?? [];
+        isRangeInitialized = true;
+      });
 
-      if (rangesResponse != null && rangesResponse.isNotEmpty) {
-        Position? position;
-
-        try {
-          // Zkus získat aktuální polohu
-          position = await _getCurrentLocation();
-        } catch (e) {
-          print('Chyba při získávání polohy: $e');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Nepodařilo se získat polohu. Ruční výběr střelnice je k dispozici.',
-              ),
-            ),
-          );
-        }
-
-        // Pokud byla získána poloha, najdi nejbližší střelnici
-        String? nearestRange;
-        if (position != null) {
-          nearestRange = _getNearestRange(
-            rangesResponse,
-            position.latitude,
-            position.longitude,
-          );
-        }
-
-        setState(() {
-          userRanges = rangesResponse;
-          selectedRange = nearestRange;
-          isRangeInitialized = true;
-        });
-      } else {
-        print('Střelnice nebyly nalezeny.');
+      if (userRanges.isEmpty) {
+        print('Žádné střelnice nebyly nalezeny.');
+        return;
       }
+
+      final currentPosition = await _getCurrentLocation();
+      final nearestRange = _getNearestRange(
+        userRanges,
+        currentPosition.latitude,
+        currentPosition.longitude,
+      );
+
+      setState(() {
+        selectedRange = nearestRange;
+      });
+      print('Předvybraná střelnice: $selectedRange');
     } catch (e) {
       print('Chyba při načítání střelnic: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Nepodařilo se načíst střelnice.'),
-        ),
-      );
       setState(() {
         isRangeInitialized = true;
       });
@@ -162,13 +156,18 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   Future<Position> _getCurrentLocation() async {
     try {
       final isServiceEnabled = await Geolocator.isLocationServiceEnabled();
+      print('Služba polohy aktivní: $isServiceEnabled');
+
       if (!isServiceEnabled) {
         throw 'Služba určování polohy je zakázaná.';
       }
 
       var permission = await Geolocator.checkPermission();
+      print('Aktuální oprávnění: $permission');
+
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
+        print('Oprávnění po žádosti: $permission');
       }
 
       if (permission == LocationPermission.deniedForever ||
@@ -176,64 +175,97 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
         throw 'Přístup k poloze je zakázán.';
       }
 
-      return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+      final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+      print('Získaná poloha: ${position.latitude}, ${position.longitude}');
+      return position;
     } catch (e) {
       print('Chyba při získávání polohy: $e');
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Nepodařilo se získat polohu. Zkontrolujte nastavení polohy a oprávnění aplikace.',
-          ),
-        ),
-      );
-
-      // Pokud je třeba, můžeš zde vrátit výchozí hodnotu nebo explicitní chybu
-      return Future.error('Nepodařilo se získat polohu.');
+      throw Exception('Nepodařilo se získat polohu.');
     }
   }
 
-  // Volání API pro zjištění informací o náboji
+  //Ovládání svítilny
+  Future<void> _toggleFlash() async {
+    try {
+      await controller!.toggleFlash(); // Přepnutí svítilny
+      final flashStatus =
+          await controller!.getFlashStatus(); // Získání aktuálního stavu
+      setState(() {
+        isFlashOn = flashStatus ?? false; // Aktualizace stavu podle výsledku
+      });
+      print('Stav svítilny: $flashStatus');
+    } catch (e) {
+      print('Chyba při přepínání svítilny: $e');
+    }
+  }
+
+  void _simulateQRScan() {
+    print('Simulace QR kódu spuštěna');
+    setState(() {
+      scannedCode = 'TEST_CODE_123';
+    });
+
+    print('Naskenovaný kód: $scannedCode');
+    _fetchCartridgeInfo(scannedCode!);
+  }
+
+  void _showCartridgeInfoDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Informace o náboji'),
+          content: Text(cartridgeInfo ?? 'Žádné informace k zobrazení.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Po potvrzení pokračovat na výběr zbraní
+                _fetchUserWeapons(cartridgeData!['cartridge']['caliber']['id']);
+              },
+              child: const Text('Pokračovat'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _fetchCartridgeInfo(String code) async {
+    print('Volání API pro kód: $code');
     try {
       final response = await ApiService.checkBarcode(code); // Volání API služby
+      print('Odpověď z API: $response');
 
-      // Ověření, zda odpověď obsahuje požadované informace
       if (response.containsKey('cartridge') && response['cartridge'] != null) {
-        final cartridge = response['cartridge'];
-        final caliber = cartridge['caliber'];
-
+        print('Data náboje nalezena: ${response['cartridge']}');
         setState(() {
-          cartridgeData = response;
-          cartridgeInfo = 'Náboj: ${cartridge['name'] ?? 'Neznámý'}, '
-              'Kalibr: ${caliber?['name'] ?? 'Neznámý'}';
+          cartridgeData = response; // Uložení dat o náboji
+          cartridgeInfo = 'Náboj: ${response['cartridge']['name']}\n'
+              'Kalibr: ${response['cartridge']['caliber']['name']}\n'
+              'Sklad: ${response['cartridge']['stock_quantity']} ks';
         });
 
-        // Zavibrujte po úspěšném načtení dat
-        if (await Vibration.hasVibrator() ?? false) {
-          Vibration.vibrate(duration: 200); // Vibrace na 200 ms
-        }
-
-        // Načtení zbraní odpovídajících kalibru, pokud kalibr existuje
-        if (caliber != null && caliber['id'] != null) {
-          _fetchUserWeapons(caliber['id']);
-        }
+        // Zobrazení dialogu s informacemi o náboji
+        _showCartridgeInfoDialog();
       } else {
-        // Pokud není náboj v systému zaveden, zobrazí se uživatelsky přívětivější zpráva
+        print('Náboj nebyl nalezen');
         setState(() {
-          cartridgeInfo =
-              'Náboj s tímto čárovým kódem není v systému zaveden. Začněte prosím přiřazením kódu k náboji v "Sken&Navýšení Skladu"';
+          cartridgeInfo = 'Náboj nebyl nalezen';
         });
-        controller?.resumeCamera(); // Obnovení kamery při chybě
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Náboj nebyl nalezen.')),
+        );
       }
     } catch (e) {
+      print('Chyba při volání API: $e');
       setState(() {
-        cartridgeInfo =
-            'Chyba při načítání náboje. Zkontrolujte prosím připojení a zkuste to znovu.'; // Zobrazení přívětivější chyby
+        cartridgeInfo = 'Chyba při volání API';
       });
-      controller?.resumeCamera(); // Obnovení kamery při chybě
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chyba při načítání dat.')),
+      );
     }
   }
 
@@ -335,7 +367,8 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text('Zbraně odpovídající kalibru'),
+          title:
+              Text('Vyberte zbraň pro ${cartridgeData!['cartridge']['name']}'),
           content: userWeapons.isNotEmpty
               ? Column(
                   mainAxisSize: MainAxisSize.min,
@@ -346,7 +379,8 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                       onTap: () {
                         Navigator.of(context)
                             .pop(); // Zavřít dialog po výběru zbraně
-                        _showShootingLogForm(weapon['id']);
+                        _showShootingLogForm(
+                            weapon['id']); // Pokračovat na formulář
                       },
                     );
                   }).toList(),
@@ -385,7 +419,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     print('Před zobrazením formuláře - dostupné střelnice: $userRanges');
 
     // Inicializace dialogSelectedRange podle aktuální hodnoty selectedRange
-    dialogSelectedRange = selectedRange;
+    dialogSelectedRange = selectedRange ?? 'Bez střelnice';
 
     await _fetchUserActivities();
 
@@ -442,20 +476,22 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                       },
                     ),
                     DropdownButtonFormField<String>(
-                      decoration: InputDecoration(labelText: 'Střelnice'),
+                      decoration: const InputDecoration(labelText: 'Střelnice'),
                       value: dialogSelectedRange,
-                      items: userRanges.isNotEmpty
-                          ? userRanges.map<DropdownMenuItem<String>>((range) {
-                              return DropdownMenuItem<String>(
-                                value: range['name'],
-                                child: Text(range['name']),
-                              );
-                            }).toList()
-                          : [
-                              DropdownMenuItem(
-                                  value: null,
-                                  child: Text('Žádné dostupné střelnice'))
-                            ],
+                      items: [
+                        const DropdownMenuItem<String>(
+                          value:
+                              "Bez střelnice", // Hodnota musí být konzistentní
+                          child: Text('Bez střelnice'),
+                        ),
+                        ...userRanges.map<DropdownMenuItem<String>>((range) {
+                          return DropdownMenuItem<String>(
+                            value: range[
+                                'name'], // Předpokládáme, že střelnice má pole 'name'
+                            child: Text(range['name']),
+                          );
+                        }).toList(),
+                      ],
                       onChanged: (value) {
                         setState(() {
                           dialogSelectedRange = value;
@@ -500,30 +536,36 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                 ),
                 TextButton(
                   onPressed: () {
-                    if (ammoCountController.text.isNotEmpty &&
-                        selectedActivity != null &&
-                        dialogSelectedRange != null &&
-                        dateController.text.isNotEmpty) {
+                    final shotsFired = int.tryParse(ammoCountController.text);
+                    if (shotsFired == null ||
+                        shotsFired <= 0 ||
+                        selectedActivity == null) {
                       setState(() {
-                        selectedRange = null; // Nebyla vybrána žádná střelnice
-                        isRangeInitialized =
-                            true; // Nastav jako inicializované, aby se dialog zobrazil
+                        isAmmoError = shotsFired == null || shotsFired <= 0;
+                        errorMessage = 'Vyplňte všechna povinná pole!';
                       });
-                      _createShootingLog(
-                        weaponId,
-                        int.parse(ammoCountController.text),
-                        selectedActivity!,
-                        dialogSelectedRange!,
-                        dateController.text,
-                        noteController.text,
-                      );
-                      Navigator.of(context).pop();
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                            content: Text('Vyplňte všechna povinná pole!')),
-                      );
+                      return;
                     }
+
+                    // Zavolání metody _createShootingLog s chybovým callbackem
+                    _createShootingLog(
+                      weaponId,
+                      shotsFired,
+                      selectedActivity!,
+                      dialogSelectedRange,
+                      dateController.text,
+                      noteController.text,
+                      (error) {
+                        // Callback pro zpracování chyby
+                        setState(() {
+                          errorMessage = error;
+                          if (error == 'Not enough ammunition.') {
+                            isAmmoError =
+                                true; // Nastavení chyby u počtu nábojů
+                          }
+                        });
+                      },
+                    );
                   },
                   child: const Text('Uložit'),
                 ),
@@ -542,17 +584,11 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     int weaponId,
     int shotsFired,
     String activityType,
-    String rangeName,
+    String? rangeName, // Umožni nullable
     String date,
     String note,
+    Function(String) onErrorCallback, // Callback pro zpracování chyb
   ) async {
-    if (cartridgeData == null ||
-        cartridgeData!['cartridge'] == null ||
-        cartridgeData!['cartridge']['id'] == null) {
-      print('Chyba: Naskenovaný náboj nebo cartridge data nejsou k dispozici');
-      return;
-    }
-
     try {
       final dynamic idValue = cartridgeData!['cartridge']['id'];
       final int cartridgeId =
@@ -562,13 +598,12 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
         "weapon_id": weaponId,
         "cartridge_id": cartridgeId,
         "activity_type": activityType,
-        "range": rangeName,
-        "shots_fired": shotsFired, // Počet vystřelených nábojů
-        "date": date, // Datum aktivity
-        "note": note, // Poznámka
+        "range": rangeName, // Odeslání null, pokud nebyla vybrána střelnice
+        "shots_fired": shotsFired,
+        "date": date,
+        "note": note,
       });
 
-      // Zpracování úspěšné odpovědi
       if (response.containsKey('shooting_log_id')) {
         print(
             'Záznam ve střeleckém deníku byl úspěšně vytvořen: ID ${response['shooting_log_id']}');
@@ -578,17 +613,15 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
                 'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}'),
           ),
         );
+        Navigator.of(context).pop(); // Zavřít dialog při úspěchu
       } else {
-        // Zpracování chyby, pokud API vrátí jiný výsledek než úspěšné vytvoření
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(response['error'] ?? 'Chyba při ukládání.')),
-        );
+        final errorMessage = response['error'] ?? 'Chyba při ukládání.';
+        print('Chyba při vytváření záznamu: $errorMessage');
+        onErrorCallback(errorMessage); // Zpracování chyby
       }
     } catch (e) {
       print('Chyba při vytváření záznamu ve střeleckém deníku: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Chyba při vytváření záznamu.')),
-      );
+      onErrorCallback('Chyba při vytváření záznamu.'); // Zpracování chyby
     }
   }
 
@@ -598,36 +631,47 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       appBar: AppBar(
         title: const Text('Identifikace náboje'),
       ),
-      body: isRangeInitialized
-          ? Column(
-              children: <Widget>[
-                Expanded(
-                  flex: 4,
-                  child: QRView(
-                    key: qrKey,
-                    onQRViewCreated: _onQRViewCreated,
-                  ),
+      body: Column(
+        children: <Widget>[
+          // Oblast pro QR scanner
+          Expanded(
+            flex: 4,
+            child: QRView(
+              key: qrKey,
+              onQRViewCreated: _onQRViewCreated,
+              overlay: QrScannerOverlayShape(
+                borderColor: Colors.blue,
+                borderRadius: 10,
+                borderLength: 30,
+                borderWidth: 10,
+                cutOutSize: 250,
+              ),
+            ),
+          ),
+          // Oblast pro ovládání
+          Expanded(
+            flex: 1,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Stav svítilny
+                Text('Svítilna je ${isFlashOn ? "zapnutá" : "vypnutá"}'),
+                // Tlačítko pro zapnutí/vypnutí svítilny
+                ElevatedButton(
+                  onPressed: _toggleFlash, // Metoda pro přepnutí svítilny
+                  child:
+                      Text(isFlashOn ? 'Vypnout svítilnu' : 'Zapnout svítilnu'),
                 ),
-                Expanded(
-                  flex: 1,
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Text(
-                        scannedCode != null
-                            ? (cartridgeInfo ?? 'Načítám informace o náboji...')
-                            : 'Naskenujte QR kód',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  ),
+                // Tlačítko pro simulaci QR kódu
+                ElevatedButton(
+                  onPressed: _simulateQRScan,
+                  child: const Text('Simulovat naskenování QR kódu'),
                 ),
               ],
-            )
-          : Center(
-              child: CircularProgressIndicator(), // Indikátor načítání
             ),
+          ),
+        ],
+      ),
     );
   }
 }
