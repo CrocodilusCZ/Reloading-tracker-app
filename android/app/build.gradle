@@ -36,12 +36,13 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.simple_login_app"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
-    }
+    applicationId = "com.example.simple_login_app"
+    minSdk = 23 // Ujisti se, že je hodnota alespoň 23
+    targetSdk = flutter.targetSdkVersion
+    versionCode = flutter.versionCode
+    versionName = flutter.versionName
+}
+
 
     buildTypes {
         release {
