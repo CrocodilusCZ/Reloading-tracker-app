@@ -49,116 +49,162 @@ class InventoryComponentsScreen extends StatelessWidget {
 
   Widget _buildCategoryCard(BuildContext context, String title,
       List<dynamic> components, String type, IconData icon) {
+    // Určení specifické ikony pro každý typ
+    IconData cardIcon;
+    switch (type) {
+      case 'bullets':
+        cardIcon = Icons.sports_martial_arts; // Ikona pro střely
+        break;
+      case 'powders':
+        cardIcon = Icons.grain; // Ikona pro prachy
+        break;
+      case 'primers':
+        cardIcon = Icons.local_fire_department; // Ikona pro zápalky
+        break;
+      case 'brasses':
+        cardIcon = Icons.build_circle; // Ikona pro nábojnice
+        break;
+      default:
+        cardIcon = Icons.help_outline; // Výchozí ikona
+    }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16.0),
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: ExpansionTile(
-        leading: Icon(icon, color: Colors.blueGrey),
-        title: Text(title,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: _buildComponentTable(components, type),
-          ),
-        ],
+        leading: Icon(cardIcon, color: Colors.blueGrey, size: 32),
+        title: Text(
+          title,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        children: components.isEmpty
+            ? [
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Text(
+                    'Nenalezeny žádné položky.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                )
+              ]
+            : components
+                .map((component) =>
+                    _buildComponentCard(context, component, type))
+                .toList(),
       ),
     );
   }
 
-  Widget _buildComponentTable(List<dynamic> components, String type) {
-    List<DataColumn> columns;
-    List<DataRow> rows;
-
-    switch (type) {
-      case 'bullets':
-        columns = const [
-          DataColumn(label: Text('Název')),
-          DataColumn(label: Text('Váha (grains)')),
-          DataColumn(label: Text('Výrobce')),
-          DataColumn(label: Text('Průměr (inches)')),
-          DataColumn(label: Text('Cena (Kč)')),
-          DataColumn(label: Text('Skladová Zásoba (ks)')),
-        ];
-        rows = _buildRows(components, [
-          'name',
-          'weight_grains',
-          'manufacturer',
-          'diameter_inches',
-          'price',
-          'stock_quantity'
-        ]);
-        break;
-
-      case 'powders':
-        columns = const [
-          DataColumn(label: Text('Výrobce')),
-          DataColumn(label: Text('Název')),
-          DataColumn(label: Text('Skladem gramů')),
-        ];
-        rows =
-            _buildRows(components, ['manufacturer', 'name', 'stock_quantity']);
-        break;
-
-      case 'primers':
-        columns = const [
-          DataColumn(label: Text('Kategorie')),
-          DataColumn(label: Text('Název')),
-          DataColumn(label: Text('Cena (Kč)')),
-          DataColumn(label: Text('Skladová Zásoba (ks)')),
-        ];
-        rows = _buildRows(
-            components, ['categories', 'name', 'price', 'stock_quantity']);
-        break;
-
-      case 'brasses':
-        columns = const [
-          DataColumn(label: Text('Kalibr')),
-          DataColumn(label: Text('Název')),
-          DataColumn(label: Text('Skladová Zásoba (ks)')),
-        ];
-        rows =
-            _buildRows(components, ['caliber.name', 'name', 'stock_quantity']);
-        break;
-
-      default:
-        columns = [];
-        rows = [];
-    }
-
-    return components.isEmpty
-        ? const Padding(
-            padding: EdgeInsets.all(8.0),
-            child: Text('Nenalezeny žádné položky.',
-                style: TextStyle(color: Colors.grey)),
-          )
-        : SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              columns: columns,
-              rows: rows,
-              columnSpacing: 12,
-            ),
-          );
+  Widget _buildComponentCard(
+      BuildContext context, Map<String, dynamic> component, String type) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+      elevation: 3,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.blueGrey.shade100,
+          child: Icon(
+            type == 'bullets'
+                ? Icons.sports_martial_arts
+                : type == 'powders'
+                    ? Icons.grain
+                    : type == 'primers'
+                        ? Icons.local_fire_department
+                        : Icons.build_circle,
+            color: Colors.blueGrey,
+          ),
+        ),
+        title: Text(
+          component['name'] ?? 'Neznámý',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          type == 'bullets'
+              ? 'Váha: ${component['weight_grains']} grains | Výrobce: ${component['manufacturer']}'
+              : type == 'powders'
+                  ? 'Výrobce: ${component['manufacturer']} | Skladem: ${component['stock_quantity']} g'
+                  : type == 'primers'
+                      ? 'Kategorie: ${component['categories']} | Skladem: ${component['stock_quantity']} ks'
+                      : 'Kalibr: ${component['caliber.name']} | Skladem: ${component['stock_quantity']} ks',
+          style: const TextStyle(color: Colors.grey),
+        ),
+        onTap: () => _showComponentDetails(context, component, type),
+      ),
+    );
   }
 
-  List<DataRow> _buildRows(List<dynamic> components, List<String> fields) {
-    return List.generate(
-      components.length,
-      (index) {
-        final Map<String, dynamic> component =
-            components[index] as Map<String, dynamic>;
-        return DataRow.byIndex(
-          index: index,
-          color: MaterialStateProperty.resolveWith<Color?>(
-            (Set<MaterialState> states) =>
-                index % 2 == 0 ? Colors.grey[200] : null,
+  Map<String, String> _getFieldsByType(String type) {
+    switch (type) {
+      case 'bullets':
+        return {
+          'name': 'Název',
+          'weight_grains': 'Váha (grains)',
+          'manufacturer': 'Výrobce',
+          'diameter_inches': 'Průměr (inches)',
+          'price': 'Cena (Kč)',
+          'stock_quantity': 'Skladová Zásoba (ks)',
+        };
+      case 'powders':
+        return {
+          'manufacturer': 'Výrobce',
+          'name': 'Název',
+          'stock_quantity': 'Skladem gramů',
+        };
+      case 'primers':
+        return {
+          'categories': 'Kategorie',
+          'name': 'Název',
+          'price': 'Cena (Kč)',
+          'stock_quantity': 'Skladová Zásoba (ks)',
+        };
+      case 'brasses':
+        return {
+          'caliber.name': 'Kalibr',
+          'name': 'Název',
+          'stock_quantity': 'Skladová Zásoba (ks)',
+        };
+      default:
+        return {};
+    }
+  }
+
+  void _showComponentDetails(
+      BuildContext context, Map<String, dynamic> component, String type) {
+    final fields = _getFieldsByType(type);
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Detail položky: ${component['name'] ?? 'Neznámá'}'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: fields.entries.map((entry) {
+                final value =
+                    _resolveNestedField(component, entry.key.split('.'));
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Text(
+                    '${entry.value}: ${value ?? 'Neznámá'}',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                );
+              }).toList(),
+            ),
           ),
-          cells: fields.map((field) {
-            final value = _resolveNestedField(component, field.split('.'));
-            return DataCell(
-              Text(value?.toString() ?? 'Neznámá'),
-            );
-          }).toList(),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Zavřít'),
+            ),
+          ],
         );
       },
     );
@@ -170,7 +216,7 @@ class InventoryComponentsScreen extends StatelessWidget {
       if (current[field] is Map<String, dynamic>) {
         current = current[field];
       } else {
-        return current[field]; // vrátí hodnotu, pokud není další úroveň mapy
+        return current[field];
       }
     }
     return current;

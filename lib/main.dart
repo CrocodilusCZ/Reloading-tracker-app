@@ -1,23 +1,27 @@
 import 'package:flutter/material.dart';
-//import 'package:shooting_companion/services/api_service.dart';
-import 'package:shooting_companion/screens/login_screen.dart'; // Opravený import pro LoginScreen
-//import 'package:shooting_companion/screens/favorite_cartridges_screen.dart';
+import 'package:shooting_companion/screens/dashboard_screen.dart';
+import 'package:shooting_companion/screens/login_screen.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const ShootingCompanionApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class ShootingCompanionApp extends StatelessWidget {
+  const ShootingCompanionApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Simple Login App',
+      title: 'Shooting Companion', // Změněný název aplikace
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const LoginScreen(), // Ujistěte se, že je tu LoginScreen
+      initialRoute: '/login', // Nastavení výchozí trasy
+      routes: {
+        '/login': (context) => const LoginScreen(), // Přihlašovací obrazovka
+        '/dashboard': (context) =>
+            DashboardScreen(username: 'User'), // Příklad další trasy
+      },
     );
   }
 }

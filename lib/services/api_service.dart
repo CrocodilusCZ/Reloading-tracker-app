@@ -4,7 +4,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const String baseUrl = 'https://www.reloading-tracker.cz/api';
+  static const String baseUrl = 'http://192.168.0.21:8000/api';
 
   static final CookieJar _cookieJar = CookieJar();
 
@@ -40,8 +40,8 @@ class ApiService {
     }
   }
 
-  // Načtení kalibrů uživatele
-  static Future<List<dynamic>> getCalibers() async {
+  // Obecná metoda GET pro API
+  static Future<dynamic> _get(String endpoint) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('api_token');
 
@@ -50,7 +50,84 @@ class ApiService {
     }
 
     final response = await http.get(
-      Uri.parse('$baseUrl/user-calibers'), // Odpovídající endpoint pro kalibry
+      Uri.parse('$baseUrl/$endpoint'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
+
+    print('GET $endpoint: ${response.statusCode}');
+    print('Response Body: ${response.body}');
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to GET $endpoint: ${response.statusCode}');
+    }
+  }
+
+  static Future<dynamic> get(String endpoint) async {
+    return await _get(endpoint); // Zavolá privátní metodu _get
+  }
+
+  static Future<void> syncRequest(
+      String endpoint, Map<String, dynamic> data) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('Token nebyl nalezen. Přihlas se.');
+    }
+
+    // Oprava klíče 'quantity' na 'amount'
+    if (data.containsKey('quantity')) {
+      data['amount'] = data.remove('quantity');
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl$endpoint'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(data),
+      );
+
+      print("Požadavek na $endpoint: Status Code ${response.statusCode}");
+      print("Odeslaná data: $data");
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        print("Odpověď API: $responseData");
+
+        if (responseData['success'] == true) {
+          print("Synchronizace byla úspěšná.");
+        } else {
+          throw Exception("API chyba: ${responseData['message']}");
+        }
+      } else {
+        print("Chyba: ${response.body}");
+        throw Exception("Chyba při volání $endpoint: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("Chyba při volání API: $e");
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, List<Map<String, dynamic>>>>
+      getAllCartridges() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/cartridges'),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
@@ -58,34 +135,71 @@ class ApiService {
     );
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as List<dynamic>;
+      List<dynamic> cartridges = jsonDecode(response.body) as List<dynamic>;
+
+      // Rozdělení nábojů na tovární a přebíjené
+      List<Map<String, dynamic>> factoryCartridges = cartridges
+          .where((cartridge) => cartridge['type'] == 'factory')
+          .map((cartridge) => Map<String, dynamic>.from(cartridge))
+          .toList();
+
+      List<Map<String, dynamic>> reloadCartridges = cartridges
+          .where((cartridge) => cartridge['type'] == 'reload')
+          .map((cartridge) => Map<String, dynamic>.from(cartridge))
+          .toList();
+
+      return {
+        'factory': factoryCartridges,
+        'reload': reloadCartridges,
+      };
     } else {
-      throw Exception('Failed to load calibers: ${response.statusCode}');
+      throw Exception('Failed to load cartridges: ${response.statusCode}');
+    }
+  }
+
+  // Metoda pro odeslání požadavku (např. pro synchronizaci)
+  static Future<bool> sendRequest(Map<String, dynamic> requestData) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiService.baseUrl}/endpoint'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestData), // Odeslání dat ve formátu JSON
+      );
+
+      if (response.statusCode == 200) {
+        // Pokud je odpověď úspěšná (status kód 200)
+        return true;
+      } else {
+        // Pokud je odpověď neúspěšná
+        return false;
+      }
+    } catch (e) {
+      print('Chyba při odesílání požadavku: $e');
+      return false;
+    }
+  }
+
+  // Načtení kalibrů uživatele
+  static Future<List<dynamic>> getCalibers() async {
+    try {
+      final calibers = await _get('user-calibers'); // Použití metody _get
+      print('Loaded calibers: ${calibers.length}');
+      return calibers as List<dynamic>;
+    } catch (e) {
+      print('Chyba při načítání kalibrů: $e');
+      rethrow;
     }
   }
 
   // Načtení seznamu střelnic uživatele
   static Future<List<dynamic>> getUserRanges() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? token = prefs.getString('api_token'); // Získání tokenu
-
-    if (token == null) {
-      throw Exception('No token found. Please login.');
-    }
-
-    final response = await http.get(
-      Uri.parse('$baseUrl/ranges'), // Opravený endpoint
-      headers: {
-        'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
-        'Content-Type': 'application/json',
-      },
-    );
-
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body)
-          as List<dynamic>; // Očekáváme seznam střelnic
-    } else {
-      throw Exception('Chyba při načítání střelnic: ${response.statusCode}');
+    try {
+      final ranges = await _get('ranges'); // Použití metody _get
+      print('Loaded ranges: ${ranges.length}');
+      return ranges as List<dynamic>;
+    } catch (e) {
+      print('Chyba při načítání střelnic: $e');
+      rethrow;
     }
   }
 
@@ -118,8 +232,12 @@ class ApiService {
   }
 
   // Získání informací o náboji podle ID
+  // Získání informací o náboji podle ID
   static Future<Map<String, dynamic>> getCartridgeById(int id) async {
     final cookies = await _cookieJar.loadForRequest(Uri.parse(baseUrl));
+    print(
+        'Loading cookies for request: ${cookies.map((c) => '${c.name}=${c.value}').join('; ')}');
+
     final response = await http.get(
       Uri.parse('$baseUrl/cartridges/$id'),
       headers: {
@@ -127,6 +245,9 @@ class ApiService {
         'Cookie': cookies.map((c) => '${c.name}=${c.value}').join('; ')
       },
     );
+
+    print('GET cartridge by ID ($id): Status Code: ${response.statusCode}');
+    print('Response Body: ${response.body}');
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -146,7 +267,8 @@ class ApiService {
         'Content-Type': 'application/json',
         'Cookie': cookies.map((c) => '${c.name}=${c.value}').join('; ')
       },
-      body: jsonEncode({'id': id, 'quantity': quantityChange}),
+      body: jsonEncode(
+          {'id': id, 'amount': quantityChange}), // Změněno na 'amount'
     );
 
     if (response.statusCode == 200) {
@@ -184,10 +306,34 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>> getCartridgeDetails(int id) async {
+    return await _get('cartridges/$id');
+  }
+
   // Navýšení skladové zásoby náboje
   static Future<Map<String, dynamic>> increaseCartridge(
       int id, int quantity) async {
-    return await updateCartridgeQuantity(id, quantity);
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/cartridges/$id/update-stock'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({'amount': quantity}), // Změněno na 'amount'
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to increase stock by ID: ${response.statusCode}');
+    }
   }
 
   // Snížení skladové zásoby náboje
@@ -325,46 +471,6 @@ class ApiService {
   }
 
   // Získání seznamu všech nábojů a následné rozdělení na tovární a přebíjené
-  static Future<Map<String, List<Map<String, dynamic>>>>
-      getAllCartridges() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? token = prefs.getString('api_token');
-
-    if (token == null) {
-      throw Exception('No token found. Please login.');
-    }
-
-    final response = await http.get(
-      Uri.parse('$baseUrl/cartridges'), // Načtení všech nábojů
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-    );
-
-    if (response.statusCode == 200) {
-      List<dynamic> cartridges = jsonDecode(response.body) as List<dynamic>;
-
-      // Přetypování seznamu dynamických prvků na seznam map
-      List<Map<String, dynamic>> factoryCartridges = cartridges
-          .where((cartridge) => cartridge['type'] == 'factory')
-          .map((cartridge) => Map<String, dynamic>.from(cartridge))
-          .toList();
-
-      List<Map<String, dynamic>> reloadCartridges = cartridges
-          .where((cartridge) => cartridge['type'] == 'reload')
-          .map((cartridge) => Map<String, dynamic>.from(cartridge))
-          .toList();
-
-      // Vrácení jako mapy se dvěma seznamy
-      return {
-        'factory': factoryCartridges,
-        'reload': reloadCartridges,
-      };
-    } else {
-      throw Exception('Failed to load cartridges');
-    }
-  }
 
   // Metoda pro získání skladových zásob komponent
   static Future<Map<String, List<Map<String, dynamic>>>>
@@ -431,12 +537,12 @@ class ApiService {
     }
 
     final response = await http.post(
-      Uri.parse('$baseUrl/cartridges/increase-stock'),
+      Uri.parse('$baseUrl/cartridges/barcode/$barcode/update-stock'),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
       },
-      body: jsonEncode({'barcode': barcode, 'quantity': quantity}),
+      body: jsonEncode({'amount': quantity}), // Změněno na 'amount'
     );
 
     if (response.statusCode == 200) {
@@ -444,6 +550,23 @@ class ApiService {
     } else {
       throw Exception(
           'Failed to increase stock by barcode: ${response.statusCode}');
+    }
+  }
+
+  static Future<void> increaseStock({
+    int? cartridgeId,
+    String? barcode,
+    required int quantity,
+  }) async {
+    if (barcode != null && barcode.isNotEmpty) {
+      // Pokud existuje barcode, použij jej pro navýšení zásob
+      await increaseStockByBarcode(barcode, quantity);
+    } else if (cartridgeId != null) {
+      // Pokud barcode není, použij cartridgeId
+      await increaseCartridge(cartridgeId, quantity);
+    } else {
+      // Pokud není ani barcode, ani cartridgeId, vyhoď výjimku
+      throw Exception('Neither barcode nor cartridge ID provided');
     }
   }
 
@@ -529,26 +652,13 @@ class ApiService {
 
   // Načtení aktivit uživatele
   static Future<List<dynamic>> getUserActivities() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? token = prefs.getString('api_token'); // Získání tokenu
-
-    if (token == null) {
-      throw Exception('No token found. Please login.');
-    }
-
-    final response = await http.get(
-      Uri.parse('$baseUrl/activities'),
-      headers: {
-        'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
-        'Content-Type': 'application/json',
-      },
-    );
-
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body)
-          as List<dynamic>; // Očekáváme seznam aktivit
-    } else {
-      throw Exception('Chyba při načítání aktivit: ${response.statusCode}');
+    try {
+      final activities = await _get('activities'); // Použití metody _get
+      print('Loaded activities: ${activities.length}');
+      return activities as List<dynamic>;
+    } catch (e) {
+      print('Chyba při načítání aktivit: $e');
+      rethrow;
     }
   }
 }
