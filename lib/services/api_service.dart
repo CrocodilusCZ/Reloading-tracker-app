@@ -6,7 +6,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://10.0.2.2:8000/api';
+  // static const String baseUrl = 'http://10.0.2.2:8000/api';
+  static const String baseUrl = 'http://127.0.0.1:8000/api';
 
   static Future<bool> isOnline() async {
     var connectivityResult = await Connectivity().checkConnectivity();
@@ -56,6 +57,7 @@ class ApiService {
       throw Exception('No token found. Please login.');
     }
 
+    // Provádíme požadavek na API
     final response = await http.get(
       Uri.parse('$baseUrl/$endpoint'),
       headers: {
@@ -64,11 +66,29 @@ class ApiService {
       },
     );
 
-    print('GET $endpoint: ${response.statusCode}');
+    // Logování odpovědi
+    print('GET $endpoint: Status Code: ${response.statusCode}');
     print('Response Body: ${response.body}');
 
+    // Zpracování odpovědi
     if (response.statusCode == 200) {
-      return jsonDecode(response.body);
+      try {
+        final data = jsonDecode(response.body);
+
+        // Kontrola struktury dat
+        if (data is Map<String, dynamic> || data is List<dynamic>) {
+          return data; // Návrat validních dat
+        } else {
+          throw Exception('Unexpected response format: ${response.body}');
+        }
+      } catch (e) {
+        print('Chyba při parsování JSON: $e');
+        throw Exception('Failed to parse API response');
+      }
+    } else if (response.statusCode == 401) {
+      throw Exception('Unauthorized: Invalid token or session expired');
+    } else if (response.statusCode == 404) {
+      throw Exception('Not Found: The endpoint $endpoint does not exist');
     } else {
       throw Exception('Failed to GET $endpoint: ${response.statusCode}');
     }
@@ -374,23 +394,35 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getCartridgeDetails(int id) async {
     try {
-      final online = await isOnline();
+      final online = await isOnline(); // Kontrola připojení k internetu
+
+      // Načítání dat podle dostupnosti internetu
+      Map<String, dynamic>? cartridge;
       if (online) {
-        return await _get('cartridges/$id');
+        // Online režim: Načti data z API
+        cartridge = await _get('cartridges/$id') as Map<String, dynamic>;
+        print('Načtená data z API: $cartridge');
       } else {
-        // Offline režim
+        // Offline režim: Načti data z SQLite
         print('Načítám data z SQLite pro cartridge ID: $id');
-        final localCartridge =
-            await DatabaseHelper().getDataById('cartridges', id);
-        if (localCartridge != null) {
-          return localCartridge;
-        } else {
+        cartridge = await DatabaseHelper().getDataById('cartridges', id)
+            as Map<String, dynamic>?;
+        if (cartridge == null) {
           throw Exception('Cartridge not found in offline database');
         }
+        print('Načtená data z SQLite: $cartridge');
       }
+
+      // Validace dat
+      if (!cartridge.containsKey('type') || cartridge['type'] == null) {
+        print('Upozornění: Chybějící typ u cartridge: $cartridge');
+        cartridge['type'] = 'unknown'; // Volitelná výchozí hodnota
+      }
+
+      return cartridge;
     } catch (e) {
       print('Chyba při načítání cartridge: $e');
-      rethrow;
+      rethrow; // Opětovné vyhození výjimky
     }
   }
 

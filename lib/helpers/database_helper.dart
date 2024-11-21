@@ -16,10 +16,41 @@ class DatabaseHelper {
 
   DatabaseHelper._internal();
 
+  // Statická metoda pro získání zbraní
+  static Future<List<Map<String, dynamic>>> getWeapons() async {
+    final db = await DatabaseHelper().database;
+    return await db.query('weapons');
+  }
+
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDatabase();
     return _database!;
+  }
+
+  Future<void> saveWeapons(List<Map<String, dynamic>> weapons) async {
+    final db = await database;
+
+    try {
+      await db.transaction((txn) async {
+        for (var weapon in weapons) {
+          if (weapon['id'] == null || weapon['name'] == null) {
+            print("Neplatná data zbraně: $weapon - přeskočeno.");
+            continue;
+          }
+
+          await txn.insert(
+            'weapons',
+            weapon,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+          print("Uložena zbraň: ${weapon['name']} (ID: ${weapon['id']})");
+        }
+      });
+      print("Všechny zbraně byly uloženy.");
+    } catch (e) {
+      print("Chyba při ukládání zbraní: $e");
+    }
   }
 
   Future<void> updateStockOffline(int cartridgeId, int quantityChange) async {
@@ -362,7 +393,6 @@ class DatabaseHelper {
     }
   }
 
-  /// Synchronizace kalibrů z API do SQLite databáze
   Future<void> syncCartridgesFromApi(List<dynamic> cartridges) async {
     final db = await database;
 
@@ -372,62 +402,28 @@ class DatabaseHelper {
         await txn.delete('cartridges');
 
         for (var cartridge in cartridges) {
-          // Logování pro každý náboj před validací
-          print(
-              "Synchronizace cartridge: ${cartridge['name']} má typ: ${cartridge['type']}");
-
-          // Validace dat
           if (cartridge['id'] == null || cartridge['name'] == null) {
-            print("Chyba: Neplatný náboj $cartridge - přeskočeno.");
+            print("Neplatný náboj: $cartridge - přeskočeno.");
             continue;
           }
 
+          final type = cartridge['type'] ?? 'unknown';
           final cleanedCartridge = {
-            'id': cartridge['id'] is int
-                ? cartridge['id']
-                : int.tryParse(cartridge['id'].toString()),
+            'id': cartridge['id'],
             'name': cartridge['name'],
-            'stock_quantity': cartridge['stock_quantity'] != null
-                ? int.tryParse(cartridge['stock_quantity'].toString()) ?? 0
-                : 0,
-            'caliber_id': cartridge['caliber_id'] != null
-                ? int.tryParse(cartridge['caliber_id'].toString())
-                : null,
-            'price': cartridge['price'] != null && cartridge['price'] is num
-                ? (cartridge['price'] as num).toDouble()
+            'type': type,
+            'stock_quantity': cartridge['stock_quantity'] ?? 0,
+            'caliber_id': cartridge['caliber_id'],
+            'price': cartridge['price'] != null
+                ? double.tryParse(cartridge['price'].toString())
                 : 0.0,
-            'created_at': cartridge['created_at'],
-            'updated_at': cartridge['updated_at'],
-            'user_id': cartridge['user_id'] != null
-                ? (cartridge['user_id'] is int
-                    ? cartridge['user_id']
-                    : int.tryParse(cartridge['user_id'].toString()))
-                : null,
-            'type': cartridge['type'] ?? 'unknown', // Nastav výchozí hodnotu
           };
 
-          print(
-              "Vkládám do SQLite náboj ${cleanedCartridge['name']} s množstvím ${cleanedCartridge['stock_quantity']}.");
-          await txn.insert(
-            'cartridges',
-            cleanedCartridge,
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
+          await txn.insert('cartridges', cleanedCartridge,
+              conflictAlgorithm: ConflictAlgorithm.replace);
         }
       });
-
-      print(
-          "Synchronizace nábojů dokončena. Počet nábojů: ${cartridges.length}");
-
-      // Kontrola po vložení dat do SQLite
-      final savedCartridges = await db.query('cartridges');
-      print(
-          "Počet uložených nábojů v SQLite po synchronizaci: ${savedCartridges.length}");
-      for (var cartridge in savedCartridges) {
-        final caliberName =
-            await _getCaliberNameById(db, cartridge['caliber_id'] as int?);
-        print("Náboj uložený v SQLite: ${cartridge}, Kalibr: $caliberName");
-      }
+      print("Synchronizace nábojů dokončena. Počet: ${cartridges.length}");
     } catch (e) {
       print("Chyba při synchronizaci nábojů: $e");
     }
@@ -742,108 +738,45 @@ class DatabaseHelper {
   LEFT JOIN calibers ON cartridges.caliber_id = calibers.id
   ''');
 
-    // Logování načtených záznamů
-    print("Načtené náboje z SQLite (${cartridges.length}):");
-    cartridges.forEach((cartridge) {
+    print("Debug - Načtené náboje z SQLite (${cartridges.length}):");
+    for (var cartridge in cartridges) {
       print(
-          "Náboj: ${cartridge['name']}, Typ: ${cartridge['cartridge_type']}, Množství: ${cartridge['stock_quantity']}, Kalibr: ${cartridge['caliber_name']}");
-    });
+          "Raw data - ID: ${cartridge['id']}, Type: ${cartridge['type']}, CartridgeType: ${cartridge['cartridge_type']}");
+    }
 
-    // Zpracování a validace dat
     List<Map<String, dynamic>> validatedCartridges = [];
     for (var cartridge in cartridges) {
       try {
-        // Validace zásob a typů
-        final stockRaw = cartridge['stock_quantity'];
-        final stock =
-            stockRaw != null ? int.tryParse(stockRaw.toString()) ?? 0 : 0;
+        // Zachováváme původní 'type' hodnotu
+        final type = cartridge['type'] ?? cartridge['cartridge_type'];
 
-        final type = (cartridge['cartridge_type'] as String?)?.trim();
-        final caliberName = (cartridge['caliber_name'] as String?)?.trim();
-
-// Pokud je některá hodnota stále null, nahraď ji 'Unknown'
-        final validatedType =
-            type != null && type.isNotEmpty ? type : 'Unknown';
-        final validatedCaliber = caliberName != null && caliberName.isNotEmpty
-            ? caliberName
-            : 'Unknown';
-
-// Přidání do validního seznamu
         validatedCartridges.add({
           'id': cartridge['id'],
           'name': cartridge['name'] ?? 'Neznámý název',
-          'stock_quantity': stock,
-          'type': validatedType,
-          'caliber_name': validatedCaliber,
+          'stock_quantity':
+              int.tryParse(cartridge['stock_quantity']?.toString() ?? '0') ?? 0,
+          'type': type, // Ukládáme type
+          'cartridge_type':
+              type, // Ukládáme i jako cartridge_type pro kompatibilitu
+          'caliber_name': cartridge['caliber_name'] ?? 'Neznámý kalibr',
           'description': cartridge['description'],
-          'price': cartridge['price'] ?? 0.0,
+          'price':
+              double.tryParse(cartridge['price']?.toString() ?? '0.0') ?? 0.0,
           'barcode': cartridge['barcode'],
           'manufacturer': cartridge['manufacturer'],
         });
       } catch (e) {
-        // Logování chyb při zpracování konkrétního záznamu
-        print(
-            "Chyba při zpracování náboje ID ${cartridge['id']}: ${e.toString()}");
+        print("Chyba při zpracování náboje ID ${cartridge['id']}: $e");
       }
     }
 
-    print("Validní náboje (${validatedCartridges.length}):");
+    print("Debug - Validované náboje:");
+    for (var cartridge in validatedCartridges) {
+      print(
+          "Validated - ID: ${cartridge['id']}, Type: ${cartridge['type']}, CartridgeType: ${cartridge['cartridge_type']}");
+    }
 
     return validatedCartridges;
-  }
-
-  void testFilter() async {
-    final cartridges = await fetchCartridgesFromSQLite();
-    print("Test filtru: Načteno ${cartridges.length} nábojů.");
-
-    final filtered = applyFilter(cartridges);
-
-    print("Test filtru: Po aplikaci filtru: ${filtered.length} nábojů.");
-    for (var cartridge in filtered) {
-      print(
-          "Validní náboj: ${cartridge['name']}, stock_quantity=${cartridge['stock_quantity']}, cartridge_type=${cartridge['cartridge_type']}");
-    }
-  }
-
-  Future<void> saveWeapons(List<dynamic> weapons) async {
-    final db = await database;
-
-    // Vyprázdnění tabulky
-    await db.delete('weapons');
-
-    for (var weapon in weapons) {
-      await db.insert(
-        'weapons',
-        {
-          'id': weapon['id'],
-          'user_id': weapon['user_id'],
-          'name': weapon['name'],
-          'created_at': weapon['created_at'],
-          'updated_at': weapon['updated_at'],
-          'initial_shots': weapon['initial_shots'],
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    }
-  }
-
-  Future<void> syncWeaponsFromApi() async {
-    try {
-      // Načtení dat z API
-      List<dynamic> weapons = await ApiService.getUserWeapons();
-
-      // Uložení dat do SQLite
-      await saveWeapons(weapons);
-
-      print('Synchronizace zbraní dokončena.');
-    } catch (e) {
-      print('Chyba při synchronizaci zbraní: $e');
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> getWeapons() async {
-    final db = await DatabaseHelper().database;
-    return await db.query('weapons');
   }
 
   List<Map<String, dynamic>> applyFilter(

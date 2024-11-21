@@ -421,10 +421,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         print('Synchronizuji zbraně...');
         final weapons = await ApiService.getUserWeapons();
         print('Načteno zbraní z API: ${weapons.length}');
-        for (var weapon in weapons) {
+
+        // Přetypování na List<Map<String, dynamic>>
+        final weaponList = weapons.map((weapon) {
+          if (weapon is Map<String, dynamic>) {
+            return weapon;
+          } else {
+            throw Exception('Invalid weapon data: $weapon');
+          }
+        }).toList();
+
+        for (var weapon in weaponList) {
           print('Ukládám zbraň do SQLite: $weapon');
         }
-        await dbHelper.saveWeapons(weapons);
+        await dbHelper.saveWeapons(weaponList); // Předání správného typu
         print('Zbraně uloženy do SQLite.');
       } catch (e) {
         print('Chyba při synchronizaci zbraní: $e');
@@ -433,12 +443,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       print('Synchronizace všech dat dokončena.');
       _showSnackBar('Data byla úspěšně synchronizována.');
     } catch (e) {
-      print('Chyba při synchronizaci s API: $e');
-      _showSnackBar('Chyba při synchronizaci s API: $e');
+      // Zpracování chyb v hlavním bloku
+      print('Chyba při synchronizaci všech dat: $e');
+      _showSnackBar('Chyba při synchronizaci všech dat: $e');
+    } finally {
+      // Kód, který se vždy provede
+      print('Synchronizace dokončena.');
     }
   }
 
-  // Synchronizace neodeslaných požadavků
   // Synchronizace neodeslaných požadavků
   Future<void> _syncOfflineRequests() async {
     final db = await DatabaseHelper().database;
