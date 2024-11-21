@@ -19,6 +19,10 @@ import 'dart:async';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert'; // Přidán import pro jsonDecode
 import 'package:shooting_companion/screens/database_view_screen.dart';
+import 'package:shooting_companion/widgets/custom_button.dart';
+import 'package:shooting_companion/widgets/header_widget.dart';
+import 'package:shooting_companion/helpers/snackbar_helper.dart';
+import 'package:shooting_companion/helpers/connectivity_helper.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -36,11 +40,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool isOnline = true; // Stav připojení
   bool isSyncing = false; // Stav synchronizace
   late StreamSubscription<ConnectivityResult> _connectivitySubscription;
+  late ConnectivityMonitor _connectivityMonitor;
 
   @override
   void initState() {
     super.initState();
     username = widget.username;
+
+    _connectivityMonitor = ConnectivityMonitor(
+      context: context,
+      onConnectionChange: (bool isConnected) {
+        setState(() {
+          isOnline = isConnected; // Aktualizuje stav připojení
+        });
+
+        // Synchronizace při obnovení připojení
+        if (isOnline) {
+          _syncOfflineRequests();
+        }
+      },
+    );
+    _connectivityMonitor.startMonitoring(); // Spuštění sledování připojení
 
     // Inicializace _cartridgesFuture pro načtení dat
     _cartridgesFuture = _syncWithApi().then((_) async {
@@ -106,14 +126,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'reload': <Map<String, dynamic>>[],
       };
     });
-
-    // Sleduje změny připojení
-    _connectivitySubscription = Connectivity()
-        .onConnectivityChanged
-        .expand((results) => results)
-        .listen((connectivityResult) {
-      _checkConnectionStatus(connectivityResult);
-    });
   }
 
   Future<void> _logout() async {
@@ -124,31 +136,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       Navigator.pushReplacementNamed(
           context, '/login'); // Přesměrování na přihlašovací obrazovku
     } catch (e) {
-      _showSnackBar('Chyba při odhlášení: $e');
-    }
-  }
-
-  void _checkConnectionStatus(ConnectivityResult connectivityResult) {
-    final newIsOnline = connectivityResult != ConnectivityResult.none;
-
-    if (newIsOnline != isOnline) {
-      setState(() {
-        isOnline = newIsOnline;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isOnline
-              ? 'Jste online. Data se budou synchronizovat s API.'
-              : 'Jste offline. Data budou načtena z lokální databáze.'),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-
-      // Spustí synchronizaci, když aplikace přejde do online režimu
-      if (isOnline) {
-        _syncOfflineRequests();
-      }
+      SnackbarHelper.show(context, 'Chyba při odhlášení: $e');
     }
   }
 
@@ -342,10 +330,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         isRangeInitialized = ranges.isNotEmpty;
       });
       if (!isRangeInitialized) {
-        _showSnackBar('Nemáte žádné střelnice.');
+        SnackbarHelper.show(context, 'Nemáte žádné střelnice.');
       }
     } catch (e) {
-      _showSnackBar('Chyba při načítání střelnic.');
+      SnackbarHelper.show(context, 'Chyba při načítání střelnic.');
     }
   }
 
@@ -353,7 +341,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       await _syncWithApi();
     } catch (e) {
-      _showSnackBar('Chyba při synchronizaci s API: $e');
+      SnackbarHelper.show(context, 'Chyba při synchronizaci s API: $e');
     }
 
     // Pokusíme se synchronizovat offline požadavky
@@ -441,11 +429,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       print('Synchronizace všech dat dokončena.');
-      _showSnackBar('Data byla úspěšně synchronizována.');
+      SnackbarHelper.show(context, 'Data byla úspěšně synchronizována.');
     } catch (e) {
       // Zpracování chyb v hlavním bloku
       print('Chyba při synchronizaci všech dat: $e');
-      _showSnackBar('Chyba při synchronizaci všech dat: $e');
+      SnackbarHelper.show(context, 'Chyba při synchronizaci všech dat: $e');
     } finally {
       // Kód, který se vždy provede
       print('Synchronizace dokončena.');
@@ -703,13 +691,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           : ListView(
               padding: const EdgeInsets.all(16.0),
               children: [
-                _buildButton(
+                CustomButton(
                   icon: Icons.book,
                   text: 'Střelecký deník',
                   color: isRangeInitialized ? Colors.teal : Colors.grey,
                   onPressed: () {
                     if (!isRangeInitialized) {
-                      _showSnackBar(
+                      SnackbarHelper.show(context,
                           'Střelnice nebyly načteny. Pokračujete bez přiřazené střelnice.');
                     }
                     Navigator.push(
@@ -721,7 +709,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-                _buildButton(
+                CustomButton(
                   icon: Icons.qr_code_scanner,
                   text: 'Sklad',
                   color: Colors.blueAccent,
@@ -735,7 +723,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-                _buildButton(
+                CustomButton(
                   icon: Icons.inventory_2,
                   text: 'Inventář nábojů',
                   color: Colors.grey.shade700,
@@ -800,7 +788,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   },
                 ),
                 const SizedBox(height: 16),
-                _buildButton(
+                CustomButton(
                   icon: Icons.visibility,
                   text: 'Stav skladu komponent',
                   color: Colors.blueGrey,
@@ -833,97 +821,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       await dbHelper.deleteAllTables();
 
-      _showSnackBar('Databáze byla úspěšně smazána.');
+      SnackbarHelper.show(context, 'Databáze byla úspěšně smazána.');
 
       Navigator.pushReplacementNamed(context, '/login');
     } catch (e) {
-      _showSnackBar('Chyba při mazání databáze: $e');
+      SnackbarHelper.show(context, 'Chyba při mazání databáze: $e');
     }
-  }
-
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Widget _buildHeader() {
-    print('Rendering header with username: $username');
-    return Row(
-      children: [
-        const Icon(Icons.person, size: 40, color: Colors.blueGrey),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                username,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Verze aplikace: Shooting_companion_0.9',
-                style: const TextStyle(
-                  fontSize: 14, // Zmenšeno z 16
-                  color: Colors.grey,
-                ),
-                overflow:
-                    TextOverflow.ellipsis, // Zkrácení textu, pokud se nevejde
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildButton({
-    required IconData icon,
-    required String text,
-    required Color color,
-    required VoidCallback onPressed,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      height: 50,
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: color,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 24, color: Colors.white),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                text,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
   void dispose() {
-    _connectivitySubscription.cancel(); // Zrušení sledování připojení
-    super.dispose(); // Zavolání nadřazené dispose metody
+    _connectivityMonitor.stopMonitoring(); // Ukončení sledování připojení
+    super.dispose();
   }
 }
