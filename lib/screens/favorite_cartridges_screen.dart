@@ -3,6 +3,7 @@ import 'package:shooting_companion/services/api_service.dart'; // Import API slu
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
 import 'package:shooting_companion/screens/cartridge_detail_screen.dart';
+import 'package:flutter/services.dart';
 
 List<Map<String, dynamic>> originalFactoryCartridges = [];
 List<Map<String, dynamic>> originalReloadCartridges = [];
@@ -45,6 +46,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   void _updateCartridges(List<Map<String, dynamic>> cartridges) {
     print("Aktualizuji náboje...");
     print("Před filtrem: ${cartridges.length} nábojů");
+    print("_showFactoryCartridges: $_showFactoryCartridges");
 
     final sourceCartridges = _showFactoryCartridges
         ? originalFactoryCartridges
@@ -56,9 +58,11 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
 
     setState(() {
       if (_showFactoryCartridges) {
+        print("Aktualizuji tovární náboje...");
         widget.factoryCartridges.clear();
         widget.factoryCartridges.addAll(filteredCartridges);
       } else {
+        print("Aktualizuji přebíjené náboje...");
         widget.reloadCartridges.clear();
         widget.reloadCartridges.addAll(filteredCartridges);
       }
@@ -102,15 +106,29 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
 
   List<Map<String, dynamic>> _filterByCaliber(
       List<Map<String, dynamic>> cartridges) {
-    print("Před filtrem: ${cartridges.length} nábojů");
+    print("=== Začínám filtrování nábojů ===");
+    print("Počet nábojů před filtrem: ${cartridges.length}");
+
+    // Log každého náboje před filtrem
+    cartridges.forEach((cartridge) {
+      final caliberName = cartridge['caliber_name'] ??
+          (cartridge['caliber']?['name'] ?? 'Neznámý kalibr');
+      final stockQuantity = cartridge['stock_quantity'] ?? 0;
+      print(
+          "Náboj: ${cartridge['name']} | Kalibr: $caliberName | Skladové množství: $stockQuantity");
+    });
+
+    print(
+        "Parametry filtru: selectedCaliber = $selectedCaliber, _showZeroStock = $_showZeroStock");
 
     var filtered = cartridges;
 
+    // Filtrování podle kalibru
     if (selectedCaliber != null && selectedCaliber != "Vše") {
+      print("Filtruji podle kalibru: $selectedCaliber");
       filtered = filtered.where((cartridge) {
         String? caliberName;
 
-        // Podpora různých zdrojů dat (SQLite nebo API)
         if (cartridge.containsKey('caliber_name') &&
             cartridge['caliber_name'] != null) {
           caliberName = cartridge['caliber_name'] as String;
@@ -119,66 +137,168 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
           caliberName = cartridge['caliber']['name'] as String;
         }
 
-        return caliberName == selectedCaliber;
+        final matches = caliberName == selectedCaliber;
+        print(
+            "Kontrola kalibru: ${cartridge['name']} | Kalibr: $caliberName | Shoda: $matches");
+        return matches;
       }).toList();
-      print("Po filtru kalibru: ${filtered.length} nábojů");
+      print("Počet nábojů po filtru kalibru: ${filtered.length}");
     }
 
+    // Filtrování podle dostupnosti skladu
     if (!_showZeroStock) {
+      print("Filtruji podle skladové dostupnosti (bez nulových hodnot).");
       filtered = filtered.where((cartridge) {
         final stockQuantity = cartridge['stock_quantity'] ?? 0;
-        return stockQuantity > 0;
+        final isAvailable = stockQuantity > 0;
+        print(
+            "Kontrola skladu: ${cartridge['name']} | Sklad: $stockQuantity | Dostupný: $isAvailable");
+        return isAvailable;
       }).toList();
-      print("Po filtru skladové dostupnosti: ${filtered.length} nábojů");
+      print("Počet nábojů po filtru skladu: ${filtered.length}");
     }
 
+    if (filtered.isEmpty) {
+      print("!!! Žádné náboje neprošly filtrem.");
+    } else {
+      print("Finální výstup filtru: ${filtered.length} nábojů");
+      filtered.forEach((cartridge) {
+        print(
+            "Výstup: Náboj: ${cartridge['name']} | Kalibr: ${cartridge['caliber_name']} | Sklad: ${cartridge['stock_quantity']}");
+      });
+    }
+
+    print("=== Filtrování dokončeno ===");
     return filtered;
   }
 
   Future<List<Map<String, dynamic>>> fetchCartridges(bool isOnline) async {
     try {
+      // Pokus o načtení dat z API
       if (isOnline) {
         final apiCartridges = await ApiService.getAllCartridges();
 
         if (apiCartridges == null) {
-          throw Exception('Žádná data z API.');
+          print('API vrátilo null, přepínám na SQLite.');
+          return await fetchCartridgesFromSQLite();
         }
 
+        // Extrakce továrních a přebíjených nábojů
         final factory = apiCartridges['factory'] ?? [];
         final reload = apiCartridges['reload'] ?? [];
+
         print(
             "Načteno z API: Factory=${factory.length}, Reload=${reload.length}");
 
         return [...factory, ...reload];
-      } else {
-        return await fetchCartridgesFromSQLite();
       }
-    } catch (e) {
-      print("Chyba při načítání dat: $e");
+
+      // Offline režim: načtení dat ze SQLite
       return await fetchCartridgesFromSQLite();
+    } catch (e) {
+      // Log chyby a pokus o načtení dat ze SQLite
+      print("Chyba při načítání dat z API nebo SQLite: $e");
+      try {
+        final sqliteCartridges = await fetchCartridgesFromSQLite();
+        print("Načteno ze SQLite: ${sqliteCartridges.length} nábojů.");
+        return sqliteCartridges;
+      } catch (sqliteError) {
+        print("Chyba při načítání dat ze SQLite: $sqliteError");
+        return []; // Vrácení prázdného seznamu jako výchozí stav
+      }
     }
   }
 
   Future<List<Map<String, dynamic>>> fetchCartridgesFromSQLite() async {
-    try {
-      final db = await DatabaseHelper().database;
-      final data = await db.rawQuery('''
-    SELECT cartridges.*, calibers.name AS caliber_name
-    FROM cartridges
-    LEFT JOIN calibers ON cartridges.caliber_id = calibers.id
-    ''');
+    final db = await DatabaseHelper().database;
 
-      if (data.isEmpty) {
-        throw Exception('Žádné náboje nejsou dostupné v offline režimu.');
+    print("Začínám načítání nábojů z SQLite...");
+
+    final cartridges = await db.rawQuery('''
+  SELECT
+    cartridges.id,
+    cartridges.load_step_id,
+    cartridges.user_id,
+    cartridges.name,
+    cartridges.description,
+    cartridges.is_public,
+    cartridges.bullet_id,
+    cartridges.primer_id,
+    cartridges.powder_weight,
+    cartridges.stock_quantity,
+    cartridges.brass_id,
+    cartridges.velocity_ms,
+    cartridges.oal,
+    cartridges.standard_deviation,
+    cartridges.is_favorite,
+    cartridges.price,
+    cartridges.caliber_id,
+    cartridges.powder_id,
+    cartridges.created_at,
+    cartridges.updated_at,
+    cartridges.type AS cartridge_type,
+    cartridges.manufacturer,
+    cartridges.bullet_specification,
+    cartridges.total_upvotes,
+    cartridges.total_downvotes,
+    cartridges.barcode,
+    cartridges.package_size,
+    calibers.name AS caliber_name
+  FROM cartridges
+  LEFT JOIN calibers ON cartridges.caliber_id = calibers.id
+  ''');
+
+    print("Načteno ${cartridges.length} záznamů z SQLite:");
+
+    List<Map<String, dynamic>> validatedCartridges = [];
+    for (var cartridge in cartridges) {
+      try {
+        // Logování každého načteného záznamu
+        print("Zpracovávám náboj: ${cartridge.toString()}");
+
+        // Validace zásob
+        final stockRaw = cartridge['stock_quantity'];
+        final stock =
+            stockRaw != null ? int.tryParse(stockRaw.toString()) ?? 0 : 0;
+
+        // Získání dalších hodnot
+        final type = cartridge['cartridge_type'] ?? 'Unknown';
+        final caliberName = cartridge['caliber_name'] ?? 'Unknown';
+
+        // Logování zpracovaných hodnot
+        print(
+            "Náboj: ${cartridge['name'] ?? 'Neznámý'} | Sklad: $stock | Typ: $type | Kalibr: $caliberName");
+
+        // Přidání validního záznamu
+        validatedCartridges.add({
+          'id': cartridge['id'],
+          'name': cartridge['name'] ?? 'Neznámý název',
+          'stock_quantity': stock,
+          'type': type,
+          'caliber_name': caliberName,
+          'description': cartridge['description'],
+          'price': cartridge['price'] ?? 0.0,
+          'barcode': cartridge['barcode'],
+          'manufacturer': cartridge['manufacturer'],
+          // Další sloupce dle potřeby
+        });
+        // Logování validace
+        print(
+            "Validace náboje: ${cartridge['name']} | Typ: $type | Sklad: $stock | Kalibr: $caliberName");
+      } catch (e) {
+        // Logování chyby při zpracování
+        print(
+            "Chyba při zpracování náboje ID ${cartridge['id']}: ${e.toString()}");
       }
-
-      print(
-          "Načtené cartridge s kalibry: ${data.map((e) => e.toString()).join('\n')}");
-      return data;
-    } catch (e) {
-      print("Chyba při načítání dat z SQLite: $e");
-      throw Exception('Chyba při načítání dat z lokální databáze.');
     }
+
+    print("Validní náboje (${validatedCartridges.length}):");
+    for (var validCartridge in validatedCartridges) {
+      print(
+          "Validní: ID=${validCartridge['id']} | Název=${validCartridge['name']} | Kalibr=${validCartridge['caliber_name']} | Sklad=${validCartridge['stock_quantity']}");
+    }
+
+    return validatedCartridges;
   }
 
   @override
@@ -205,47 +325,102 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   }
 
   Widget _buildToggleButtons() {
+    // Pořadí tlačítek na základě stavu
+    final toggleLabels = _showFactoryCartridges
+        ? ['Tovární', 'Přebíjené']
+        : ['Přebíjené', 'Tovární'];
+
     return Card(
       elevation: 3,
       color: Colors.grey.shade200,
       child: Padding(
         padding: const EdgeInsets.all(8.0),
         child: Center(
-          child: ToggleButtons(
-            borderRadius: BorderRadius.circular(10),
-            selectedColor: Colors.white,
-            fillColor: Colors.blueGrey,
-            color: Colors.blueGrey,
-            isSelected: [
-              _showFactoryCartridges,
-              !_showFactoryCartridges,
-            ],
-            onPressed: (index) {
-              setState(() {
-                _showFactoryCartridges = index == 0;
-                _updateCalibers();
-              });
-            },
-            children: const [
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: [
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(opacity: animation, child: child);
+                },
                 child: Text(
-                  'Tovární náboje',
-                  style: TextStyle(fontSize: 16),
+                  _showFactoryCartridges
+                      ? 'Tovární náboje'
+                      : 'Přebíjené náboje',
+                  key: ValueKey<bool>(_showFactoryCartridges),
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  'Přebíjené náboje',
-                  style: TextStyle(fontSize: 16),
-                ),
+              const SizedBox(height: 8),
+              ToggleButtons(
+                borderRadius: BorderRadius.circular(10),
+                selectedColor: Colors.white,
+                fillColor: Colors.blueGrey,
+                color: Colors.blueGrey,
+                isSelected: [
+                  _showFactoryCartridges,
+                  !_showFactoryCartridges,
+                ],
+                onPressed: (index) {
+                  setState(() {
+                    _showFactoryCartridges = index == 0;
+                    _updateCartridges(_showFactoryCartridges
+                        ? originalFactoryCartridges
+                        : originalReloadCartridges);
+                  });
+                },
+                children: toggleLabels.map((label) {
+                  return GestureDetector(
+                    onLongPress: () {
+                      HapticFeedback.mediumImpact(); // Vibrace
+                      _swapToggleButtons(); // Přepnutí pořadí tlačítek
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        label,
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  void _swapToggleButtons() {
+    setState(() {
+      // Přepnutí pořadí tlačítek
+      _showFactoryCartridges = !_showFactoryCartridges;
+
+      // Prohodit data mezi továrními a přebíjenými náboji
+      var tempCartridges =
+          List<Map<String, dynamic>>.from(widget.factoryCartridges);
+      widget.factoryCartridges.clear();
+      widget.factoryCartridges.addAll(widget.reloadCartridges);
+      widget.reloadCartridges.clear();
+      widget.reloadCartridges.addAll(tempCartridges);
+
+      // Aktualizace kalibrů pro novou záložku
+      _updateCalibers();
+
+      // Vizualizace animace
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _showFactoryCartridges
+                ? 'Tlačítka přesunuta: Tovární vlevo'
+                : 'Tlačítka přesunuta: Přebíjené vlevo',
+          ),
+          duration: const Duration(milliseconds: 800),
+        ),
+      );
+    });
   }
 
   Widget _buildZeroStockSwitch() {
@@ -318,6 +493,8 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
           : widget.reloadCartridges,
     );
 
+    print("Filtrace výsledků: ${filteredCartridges.length} nábojů nalezeno.");
+
     if (filteredCartridges.isEmpty) {
       return const Center(
         child: Text(
@@ -334,18 +511,42 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
         final cartridge = filteredCartridges[index];
         final name = cartridge['name'] ?? 'Neznámý náboj';
 
-        // Získání názvu kalibru
+        // Získání kalibru a skladové dostupnosti
         final caliberName = cartridge.containsKey('caliber_name')
             ? cartridge['caliber_name']
             : (cartridge['caliber']?['name'] ?? 'Neznámý kalibr');
         final stock = cartridge['stock_quantity'] ?? 0;
+
+        // Získání informace o čárovém kódu
+        final hasBarcode = cartridge.containsKey('barcode') &&
+            (cartridge['barcode'] != null && cartridge['barcode'] != '');
 
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 8),
           elevation: 3,
           child: ListTile(
             title: Text(name),
-            subtitle: Text('Kalibr: $caliberName, Sklad: $stock ks'),
+            subtitle: Row(
+              children: [
+                // Ikona kalibru
+                const Icon(Icons.linear_scale, size: 16, color: Colors.grey),
+                const SizedBox(width: 4),
+                Text(caliberName, style: const TextStyle(fontSize: 14)),
+
+                const SizedBox(width: 16),
+
+                // Ikona skladu
+                const Icon(Icons.inventory_2, size: 16, color: Colors.grey),
+                const SizedBox(width: 4),
+                Text('$stock ks', style: const TextStyle(fontSize: 14)),
+
+                const Spacer(),
+
+                // Ikona čárového kódu, pokud existuje
+                if (hasBarcode)
+                  const Icon(Icons.qr_code, size: 20, color: Colors.blueGrey),
+              ],
+            ),
             onTap: () {
               Navigator.push(
                 context,

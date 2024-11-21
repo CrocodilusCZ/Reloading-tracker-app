@@ -18,6 +18,7 @@ import 'package:cross_file/cross_file.dart'; // Přidáno pro použití XFile
 import 'dart:async';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert'; // Přidán import pro jsonDecode
+import 'package:shooting_companion/screens/database_view_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -40,12 +41,76 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     username = widget.username;
-    _initializeDashboard();
+
+    // Inicializace _cartridgesFuture pro načtení dat
+    _cartridgesFuture = _syncWithApi().then((_) async {
+      try {
+        // Načti data ze SQLite nebo jiného zdroje po synchronizaci
+        final cartridgesFromSQLite =
+            await DatabaseHelper().fetchCartridgesFromSQLite();
+
+        print("Načtené náboje z SQLite:");
+        for (var cartridge in cartridgesFromSQLite) {
+          print(
+              "Náboj: ${cartridge['name']}, Typ: ${cartridge['cartridge_type']}, Množství: ${cartridge['stock_quantity']}, Kalibr: ${cartridge['caliber_name']}");
+        }
+
+        // Kontrola a oprava chybějících dat
+        final cleanedCartridges = cartridgesFromSQLite.map((cartridge) {
+          // Zajistí, že cartridge_type a caliber_name nejsou null
+          return {
+            ...cartridge,
+            'cartridge_type': cartridge['cartridge_type'] ?? 'unknown',
+            'caliber_name': cartridge['caliber_name'] ?? 'Unknown',
+          };
+        }).toList();
+
+        // Rozdělení na tovární a přebíjené náboje
+        final factory = cleanedCartridges
+            .where((cartridge) => cartridge['cartridge_type'] == 'factory')
+            .toList();
+        final reload = cleanedCartridges
+            .where((cartridge) => cartridge['cartridge_type'] == 'reload')
+            .toList();
+
+        print("Načteno: Factory=${factory.length}, Reload=${reload.length}");
+
+        // Logování případných neznámých typů
+        final unknownCartridges = cleanedCartridges
+            .where((cartridge) => cartridge['cartridge_type'] == 'unknown')
+            .toList();
+        if (unknownCartridges.isNotEmpty) {
+          print("Upozornění: Některé náboje mají neznámý typ:");
+          for (var cartridge in unknownCartridges) {
+            print(
+                "Náboj: ${cartridge['name']}, Typ: ${cartridge['cartridge_type']}, Kalibr: ${cartridge['caliber_name']}");
+          }
+        }
+
+        // Vrácení načtených dat
+        return {
+          'factory': factory,
+          'reload': reload,
+        };
+      } catch (e) {
+        print('Chyba při načítání dat po synchronizaci: $e');
+        return {
+          'factory': <Map<String, dynamic>>[],
+          'reload': <Map<String, dynamic>>[],
+        };
+      }
+    }).catchError((error) {
+      print('Chyba při synchronizaci: $error');
+      return {
+        'factory': <Map<String, dynamic>>[],
+        'reload': <Map<String, dynamic>>[],
+      };
+    });
 
     // Sleduje změny připojení
     _connectivitySubscription = Connectivity()
         .onConnectivityChanged
-        .expand((results) => results) // Rozdělí seznam na jednotlivé prvky
+        .expand((results) => results)
         .listen((connectivityResult) {
       _checkConnectionStatus(connectivityResult);
     });
@@ -186,26 +251,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
         isOnline = true;
       });
 
+      print("Data načtena z API: ${apiData.keys.join(', ')}");
+
       // Synchronizace s SQLite
       final allCartridges = [...?apiData['factory'], ...?apiData['reload']];
+      print("Počet všech nábojů ke synchronizaci: ${allCartridges.length}");
       await DatabaseHelper().syncCartridgesFromApi(allCartridges);
 
       // Synchronizace kalibrů
       final calibers = await ApiService.getCalibers();
+      print("Počet načtených kalibrů: ${calibers.length}");
       await DatabaseHelper().syncCalibersFromApi(calibers);
 
       // Aplikace filtru na data z API
+      print("Aplikuji filtry na data z API...");
       final filteredFactory =
           DatabaseHelper().applyFilter(apiData['factory'] ?? []);
       final filteredReload =
           DatabaseHelper().applyFilter(apiData['reload'] ?? []);
+
+      print(
+          "Filtrované náboje: tovární=${filteredFactory.length}, přebíjené=${filteredReload.length}");
 
       _cartridgesFuture = Future.value({
         'factory': filteredFactory,
         'reload': filteredReload,
       });
     } catch (e) {
-      // Pokud dojde k chybě při načítání z API, nastavíme isOnline na false
       setState(() {
         isOnline = false;
       });
@@ -214,10 +286,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       print("Přecházím na načítání dat ze SQLite...");
 
       try {
-        // Načtení nábojů s 'caliber_name'
         final offlineCartridges =
             await DatabaseHelper().fetchCartridgesFromSQLite();
-
         print("Načteno ${offlineCartridges.length} nábojů ze SQLite.");
 
         for (var cartridge in offlineCartridges) {
@@ -231,7 +301,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         print("Počet nábojů po filtru: ${filteredCartridges.length}");
 
-        // Rozdělení na tovární a přebíjené podle pole 'cartridge_type'
+        // Rozdělení na tovární a přebíjené
         final factory = filteredCartridges
             .where((cartridge) => cartridge['cartridge_type'] == 'factory')
             .toList();
@@ -239,15 +309,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .where((cartridge) => cartridge['cartridge_type'] == 'reload')
             .toList();
 
-        print("Tovární náboje: ${factory.length}");
-        print("Přebíjené náboje: ${reload.length}");
+        print(
+            "Rozdělení dokončeno: tovární=${factory.length}, přebíjené=${reload.length}");
 
         _cartridgesFuture = Future.value({
           'factory': factory,
           'reload': reload,
         });
       } catch (sqliteError) {
-        // Pokud dojde k chybě i při načítání ze SQLite
         print("Chyba při načítání dat ze SQLite: $sqliteError");
 
         _cartridgesFuture = Future.value({
@@ -291,37 +360,80 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await _syncOfflineRequests();
   }
 
-  // Synchronizace s API - načítání nových dat
   Future<void> _syncWithApi() async {
     try {
-      // Načti střelnice a náboje
-      final ranges = await ApiService.getUserRanges();
-      final cartridges = await ApiService.getAllCartridges();
-      final activities = await ApiService.getUserActivities();
+      print('Synchronizace: Začínám synchronizaci všech dat.');
 
+      // Vytvoření instance DatabaseHelper
       final dbHelper = DatabaseHelper();
 
-      // Ulož střelnice
-      for (var range in ranges) {
-        await dbHelper.insertOrUpdate('ranges', range);
+      // Synchronizace střelnic
+      try {
+        print('Synchronizuji střelnice...');
+        final ranges = await ApiService.getUserRanges();
+        print('Načteno střelnic z API: ${ranges.length}');
+        await dbHelper.syncRangesFromApi(ranges);
+        print('Střelnice uloženy do SQLite. Počet střelnic: ${ranges.length}');
+      } catch (e) {
+        print('Chyba při synchronizaci střelnic: $e');
       }
 
-      // Ulož náboje
-      List<Map<String, dynamic>> allCartridges =
-          cartridges.values.expand((x) => x).toList();
-
-      for (var cartridge in allCartridges) {
-        await dbHelper.insertOrUpdate('cartridges', cartridge);
+      // Synchronizace nábojů
+      try {
+        print('Synchronizuji náboje...');
+        final cartridges = await ApiService.getAllCartridges();
+        print(
+            'Načteno nábojů z API: ${cartridges.values.expand((x) => x).length}');
+        await dbHelper.syncCartridgesFromApi(
+            [...?cartridges['factory'], ...?cartridges['reload']]);
+        print('Náboje uloženy do SQLite.');
+      } catch (e) {
+        print('Chyba při synchronizaci nábojů: $e');
       }
 
-      // Ulož aktivity
-      for (var activity in activities) {
-        await dbHelper.insertOrUpdate('activities', activity);
+      // Synchronizace kalibrů
+      try {
+        print('Synchronizuji kalibry...');
+        final calibers = await ApiService.getCalibers();
+        print('Načteno kalibrů z API: ${calibers.length}');
+        await dbHelper.syncCalibersFromApi(calibers);
+        print('Kalibry uloženy do SQLite. Počet kalibrů: ${calibers.length}');
+      } catch (e) {
+        print('Chyba při synchronizaci kalibrů: $e');
       }
 
+      // Synchronizace aktivit
+      try {
+        print('Synchronizuji aktivity...');
+        final activities = await ApiService.getUserActivities();
+        print('Načteno aktivit z API: ${activities.length}');
+        for (var activity in activities) {
+          print('Ukládám aktivitu do SQLite: $activity');
+          await dbHelper.insertOrUpdate('activities', activity);
+        }
+        print('Aktivity uloženy do SQLite.');
+      } catch (e) {
+        print('Chyba při synchronizaci aktivit: $e');
+      }
+
+      // Synchronizace zbraní
+      try {
+        print('Synchronizuji zbraně...');
+        final weapons = await ApiService.getUserWeapons();
+        print('Načteno zbraní z API: ${weapons.length}');
+        for (var weapon in weapons) {
+          print('Ukládám zbraň do SQLite: $weapon');
+        }
+        await dbHelper.saveWeapons(weapons);
+        print('Zbraně uloženy do SQLite.');
+      } catch (e) {
+        print('Chyba při synchronizaci zbraní: $e');
+      }
+
+      print('Synchronizace všech dat dokončena.');
       _showSnackBar('Data byla úspěšně synchronizována.');
     } catch (e) {
-      // Zachyťte výjimky a informujte uživatele
+      print('Chyba při synchronizaci s API: $e');
       _showSnackBar('Chyba při synchronizaci s API: $e');
     }
   }
@@ -331,7 +443,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _syncOfflineRequests() async {
     final db = await DatabaseHelper().database;
 
-    // Přidán log pro začátek synchronizace
+    // Přidán log pro začátek synchronizace_syncWithApi
     print('Začínám synchronizaci offline požadavků...');
 
     // Načtení všech "pending" požadavků
@@ -533,6 +645,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               },
             ),
             ListTile(
+              leading: Icon(Icons.table_chart, color: Colors.purple),
+              title: Text('Prohlížet databázi'),
+              onTap: () {
+                Navigator.of(context).pop(); // Zavřít Drawer
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => DatabaseViewScreen()),
+                );
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.exit_to_app, color: Colors.redAccent),
               title: Text('Odhlásit se'),
               onTap: () {
@@ -607,32 +730,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => FutureBuilder(
-                          future: _cartridgesFuture,
-                          builder: (context,
-                              AsyncSnapshot<
-                                      Map<String, List<Map<String, dynamic>>>>
-                                  snapshot) {
-                            if (snapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return const Center(
-                                  child: CircularProgressIndicator());
-                            } else if (snapshot.hasError) {
-                              return Center(
-                                  child: Text('Chyba: ${snapshot.error}'));
-                            } else if (!snapshot.hasData ||
-                                snapshot.data!['factory']!.isEmpty &&
-                                    snapshot.data!['reload']!.isEmpty) {
-                              return const Center(
-                                  child: Text('Žádné náboje nenalezeny.'));
-                            } else {
-                              return FavoriteCartridgesScreen(
-                                factoryCartridges: snapshot.data!['factory']!,
-                                reloadCartridges: snapshot.data!['reload']!,
-                              );
-                            }
-                          },
-                        ),
+                        builder: (context) => Scaffold(
+                            appBar: AppBar(
+                              title: const Text('Inventář nábojů'),
+                              backgroundColor: Colors.blueGrey,
+                            ),
+                            body: FutureBuilder<
+                                Map<String, List<Map<String, dynamic>>>>(
+                              future: _cartridgesFuture,
+                              builder: (context, snapshot) {
+                                if (snapshot.connectionState ==
+                                    ConnectionState.waiting) {
+                                  return const Center(
+                                      child: CircularProgressIndicator());
+                                } else if (snapshot.hasError) {
+                                  print(
+                                      "Chyba v FutureBuilder: ${snapshot.error}");
+                                  return Center(
+                                    child: Text(
+                                      'Chyba: ${snapshot.error}',
+                                      style: const TextStyle(
+                                          color: Colors.red, fontSize: 16),
+                                    ),
+                                  );
+                                } else if (!snapshot.hasData ||
+                                    (snapshot.data!['factory']?.isEmpty ??
+                                            true) &&
+                                        (snapshot.data!['reload']?.isEmpty ??
+                                            true)) {
+                                  print(
+                                      "Žádné náboje nenalezeny: ${snapshot.data}");
+                                  return const Center(
+                                    child: Text(
+                                      'Žádné náboje nenalezeny.',
+                                      style: TextStyle(
+                                          fontSize: 18, color: Colors.grey),
+                                    ),
+                                  );
+                                } else {
+                                  print(
+                                      "Předáváme data do FavoriteCartridgesScreen:");
+                                  print(
+                                      "Tovární: ${snapshot.data!['factory']}");
+                                  print(
+                                      "Přebíjené: ${snapshot.data!['reload']}");
+                                  return FavoriteCartridgesScreen(
+                                    factoryCartridges:
+                                        snapshot.data!['factory']!,
+                                    reloadCartridges: snapshot.data!['reload']!,
+                                  );
+                                }
+                              },
+                            )),
                       ),
                     );
                   },
@@ -685,27 +834,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    print('Rendering header with username: $username');
+    return Row(
       children: [
-        Row(
-          children: [
-            const Icon(Icons.person, size: 28, color: Colors.blueGrey),
-            const SizedBox(width: 8),
-            Text(
-              username,
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
+        const Icon(Icons.person, size: 40, color: Colors.blueGrey),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                username,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Verze aplikace: Shooting_companion_0.9',
-          style: const TextStyle(fontSize: 16, color: Colors.grey),
+              const SizedBox(height: 4),
+              Text(
+                'Verze aplikace: Shooting_companion_0.9',
+                style: const TextStyle(
+                  fontSize: 14, // Zmenšeno z 16
+                  color: Colors.grey,
+                ),
+                overflow:
+                    TextOverflow.ellipsis, // Zkrácení textu, pokud se nevejde
+              ),
+            ],
+          ),
         ),
       ],
     );

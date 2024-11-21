@@ -2,9 +2,16 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:shooting_companion/helpers/database_helper.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://192.168.0.21:8000/api';
+  static const String baseUrl = 'http://10.0.2.2:8000/api';
+
+  static Future<bool> isOnline() async {
+    var connectivityResult = await Connectivity().checkConnectivity();
+    return connectivityResult != ConnectivityResult.none;
+  }
 
   static final CookieJar _cookieJar = CookieJar();
 
@@ -117,6 +124,49 @@ class ApiService {
     }
   }
 
+  static Future<List<dynamic>> getUserWeapons() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      print('Chyba: API token nebyl nalezen.');
+      throw Exception('No token found. Please login.');
+    }
+
+    print('Používám API token: $token');
+    print('Načítám všechny zbraně uživatele.');
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/weapons'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      print('GET /weapons - Status Code: ${response.statusCode}');
+      print('Response Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        try {
+          final List<dynamic> weapons = jsonDecode(response.body);
+          print('Počet načtených zbraní: ${weapons.length}');
+          return weapons;
+        } catch (e) {
+          print('Chyba při zpracování JSON odpovědi: $e');
+          throw Exception('Failed to parse weapons JSON.');
+        }
+      } else {
+        print('Chyba při volání API: ${response.body}');
+        throw Exception('Failed to load weapons: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Chyba při komunikaci s API: $e');
+      rethrow;
+    }
+  }
+
   static Future<Map<String, List<Map<String, dynamic>>>>
       getAllCartridges() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -134,8 +184,20 @@ class ApiService {
       },
     );
 
+    // Přidej logování odpovědi z API
+    print('API Response (cartridges): ${response.body}');
+
     if (response.statusCode == 200) {
       List<dynamic> cartridges = jsonDecode(response.body) as List<dynamic>;
+
+      // Přidej logování každého náboje
+      cartridges.forEach((cartridge) {
+        String name = cartridge['name'] ?? 'N/A';
+        String type = cartridge['type'] ?? 'N/A';
+        String caliberName = cartridge['caliber']?['name'] ?? 'N/A';
+
+        print('Náboj: $name, Typ: $type, Kalibr: $caliberName');
+      });
 
       // Rozdělení nábojů na tovární a přebíjené
       List<Map<String, dynamic>> factoryCartridges = cartridges
@@ -147,6 +209,10 @@ class ApiService {
           .where((cartridge) => cartridge['type'] == 'reload')
           .map((cartridge) => Map<String, dynamic>.from(cartridge))
           .toList();
+
+      // Přidej logování počtu nábojů podle typů
+      print('Factory cartridges: ${factoryCartridges.length}');
+      print('Reload cartridges: ${reloadCartridges.length}');
 
       return {
         'factory': factoryCartridges,
@@ -307,7 +373,25 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> getCartridgeDetails(int id) async {
-    return await _get('cartridges/$id');
+    try {
+      final online = await isOnline();
+      if (online) {
+        return await _get('cartridges/$id');
+      } else {
+        // Offline režim
+        print('Načítám data z SQLite pro cartridge ID: $id');
+        final localCartridge =
+            await DatabaseHelper().getDataById('cartridges', id);
+        if (localCartridge != null) {
+          return localCartridge;
+        } else {
+          throw Exception('Cartridge not found in offline database');
+        }
+      }
+    } catch (e) {
+      print('Chyba při načítání cartridge: $e');
+      rethrow;
+    }
   }
 
   // Navýšení skladové zásoby náboje
@@ -622,31 +706,44 @@ class ApiService {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('api_token');
 
-    // Debug výpis pro kontrolu tokenu
-    print('Token: $token');
-
     if (token == null) {
+      print('Chyba: API token nebyl nalezen.');
       throw Exception('No token found. Please login.');
     }
 
-    // Oprava URL, pokud používáš endpoint by-caliber
-    final response = await http.get(
-      Uri.parse('$baseUrl/weapons/by-caliber/$caliberId'), // Opravená URL
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token', // Přidání tokenu pro ověření
-      },
-    );
+    print('Používám API token: $token');
+    print('Načítám zbraně pro kalibr ID: $caliberId');
 
-    // Debug výpis pro kontrolu status kódu a odpovědi
-    print('Status code: ${response.statusCode}');
-    print('Response body: ${response.body}');
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/weapons/by-caliber/$caliberId'), // Opravená URL
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token', // Přidání tokenu pro ověření
+        },
+      );
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body) as List<dynamic>;
-    } else {
-      throw Exception(
-          'Failed to load user weapons. Status: ${response.statusCode}');
+      print(
+          'GET /weapons/by-caliber/$caliberId - Status Code: ${response.statusCode}');
+      print('Response Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        try {
+          final List<dynamic> weapons = jsonDecode(response.body);
+          print('Počet načtených zbraní: ${weapons.length}');
+          return weapons;
+        } catch (e) {
+          print('Chyba při zpracování JSON odpovědi: $e');
+          throw Exception('Failed to parse weapons JSON.');
+        }
+      } else {
+        print('Chyba při volání API: ${response.body}');
+        throw Exception(
+            'Failed to load weapons by caliber: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Chyba při komunikaci s API: $e');
+      rethrow;
     }
   }
 
