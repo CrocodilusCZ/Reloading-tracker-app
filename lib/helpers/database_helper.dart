@@ -410,6 +410,7 @@ class DatabaseHelper {
           final type = cartridge['type'] ?? 'unknown';
           final cleanedCartridge = {
             'id': cartridge['id'],
+            'user_id': cartridge['user_id'],
             'name': cartridge['name'],
             'type': type,
             'stock_quantity': cartridge['stock_quantity'] ?? 0,
