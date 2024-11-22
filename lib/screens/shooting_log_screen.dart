@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:shooting_companion/services/api_service.dart'; // Import API služby
 import 'package:vibration/vibration.dart'; // Import balíčku vibration
+import 'package:shooting_companion/services/weapon_service.dart';
 
 class ShootingLogScreen extends StatefulWidget {
   const ShootingLogScreen({Key? key}) : super(key: key);
@@ -325,15 +326,14 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   // Volání API pro získání zbraní uživatele odpovídajících kalibru
   Future<void> _fetchUserWeapons(int caliberId) async {
     try {
-      final weaponsResponse =
-          await ApiService.getUserWeaponsByCaliber(caliberId); // Volání API
+      final weapons = await WeaponService.fetchWeaponsByCaliber(caliberId);
       setState(() {
-        userWeapons = weaponsResponse; // Uložení zbraní uživatele
+        userWeapons = weapons;
       });
-      _showWeaponsDialog(); // Zobrazení dialogu s výpisem zbraní
+      _showWeaponsDialog();
     } catch (e) {
       print('Chyba při načítání zbraní: $e');
-      controller?.resumeCamera(); // Obnovení kamery při chybě
+      controller?.resumeCamera();
     }
   }
 

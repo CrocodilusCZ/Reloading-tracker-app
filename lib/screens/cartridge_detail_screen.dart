@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert'; // Pro práci s JSON daty
 import 'package:shooting_companion/services/api_service.dart';
+import 'package:shooting_companion/services/weapon_service.dart';
 
 Future<bool> isOnline() async {
   var connectivityResult = await (Connectivity().checkConnectivity());
@@ -18,8 +19,22 @@ class SQLiteService {
   static Future<List<Map<String, dynamic>>> getWeaponsByCaliber(
       int caliberId) async {
     final db = await openDatabase('app_database.db');
-    return await db
-        .query('weapons', where: 'caliber_id = ?', whereArgs: [caliberId]);
+
+    print('Debug: caliberId = $caliberId');
+
+    final result = await db.query(
+      'weapons',
+      where: 'caliber_id = ?',
+      whereArgs: [caliberId],
+    );
+
+    if (result.isEmpty) {
+      print('Debug: Žádné zbraně nenalezeny pro caliberId=$caliberId');
+    } else {
+      print('Debug: Výsledek dotazu pro caliberId=$caliberId: $result');
+    }
+
+    return result;
   }
 
   static Future<List<Map<String, dynamic>>> getUserActivities() async {
@@ -82,18 +97,39 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
 
       // Načtení detailů náboje
       final details = await ApiService.getCartridgeDetails(cartridgeId);
-      print('Načtené detaily náboje: $details');
 
-      // Kontrola existence kalibru
-      if (details['caliber'] == null || details['caliber']['id'] == null) {
-        print('Kalibr náboje není dostupný. Nemohu načíst zbraně.');
+      final caliberId = details['caliber_id'] ?? details['caliber']?['id'];
+
+      if (caliberId == null) {
+        print('Chyba: Nebylo možné získat caliber_id.');
+        print('Debug: Detaily kalibru: ${details['caliber']}');
         setState(() {
           isLoading = false;
         });
-        return; // Ukončí načítání, pokud kalibr není dostupný
+        return; // Ukončí funkci, pokud caliber_id není dostupné
       }
 
-      final caliberId = details['caliber']['id'];
+      if (details == null || details.isEmpty) {
+        print('Chyba: Žádné detaily náboje nebyly vráceny z API.');
+        setState(() {
+          isLoading = false;
+        });
+        return;
+      }
+
+      if (caliberId == null) {
+        print('Chyba: Nebylo možné získat caliber_id.');
+        print('Debug: Detaily kalibru: ${details['caliber']}');
+        setState(() {
+          isLoading = false;
+        });
+        return; // Ukončí funkci, pokud caliber_id není dostupné
+      }
+
+      // Debug výpis
+      print('Debug: caliberId = $caliberId');
+
+      // Online/offline rozhodnutí
       bool online = await isOnline();
       print('Online režim: $online');
 
@@ -103,7 +139,6 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
         await _fetchOfflineData(caliberId, details);
       }
     } catch (e) {
-      // Log chyby
       print('Chyba při načítání dat: $e');
     } finally {
       setState(() {
@@ -116,21 +151,25 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
   Future<void> _fetchOnlineData(
       int caliberId, Map<String, dynamic> details) async {
     try {
-      print('Načítám zbraně a aktivity online...');
+      print('Debug: Načítám zbraně a aktivity online...');
       final weaponsResponse =
-          await ApiService.getUserWeaponsByCaliber(caliberId);
+          await WeaponService.fetchWeaponsByCaliber(caliberId);
+      print('Debug: Načtené zbraně (online): $weaponsResponse');
+
       final activitiesResponse = await ApiService.getUserActivities();
-      print('Načtené zbraně: $weaponsResponse');
-      print('Načtené aktivity: $activitiesResponse');
+      print('Debug: Načtené aktivity (online): $activitiesResponse');
+
+      if (weaponsResponse == null || weaponsResponse.isEmpty) {
+        print('Upozornění: Žádné zbraně nenalezeny pro caliberId=$caliberId');
+      }
 
       setState(() {
         cartridgeDetails = details;
-        userWeapons = weaponsResponse;
-        userActivities = activitiesResponse;
+        userWeapons = weaponsResponse ?? [];
+        userActivities = activitiesResponse ?? [];
       });
     } catch (e) {
-      print('Chyba při načítání dat z API: $e');
-      // Pokud online data selžou, zkus offline data
+      print('Error: Chyba při načítání online dat: $e');
       await _fetchOfflineData(caliberId, details);
     }
   }
@@ -138,19 +177,24 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
   Future<void> _fetchOfflineData(
       int caliberId, Map<String, dynamic> details) async {
     try {
-      print('Načítám zbraně a aktivity offline...');
-      final localWeapons = await SQLiteService.getWeaponsByCaliber(caliberId);
-      final localActivities = await SQLiteService.getUserActivities();
-      print('Načtené zbraně (offline): $localWeapons');
-      print('Načtené aktivity (offline): $localActivities');
+      print('Debug: Načítám zbraně a aktivity offline...');
 
+      // Volání metody getWeaponsByCaliber
+      final localWeapons = await SQLiteService.getWeaponsByCaliber(caliberId);
+      print('Debug: Načtené zbraně (offline): $localWeapons');
+
+      // Volání metody getUserActivities
+      final localActivities = await SQLiteService.getUserActivities();
+      print('Debug: Načtené aktivity (offline): $localActivities');
+
+      // Uložení dat do stavu
       setState(() {
         cartridgeDetails = details;
         userWeapons = localWeapons;
         userActivities = localActivities;
       });
     } catch (e) {
-      print('Chyba při načítání offline dat: $e');
+      print('Error: Chyba při načítání offline dat: $e');
     }
   }
 
@@ -292,7 +336,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                 onPressed:
                     isLoading ? null : () => _showShootingLogForm(context),
                 icon: const Icon(Icons.add),
-                label: const Text('Přidat záznam'),
+                label: const Text('Přidat záznam....:)'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blueGrey,
                   foregroundColor: Colors.white,

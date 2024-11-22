@@ -37,17 +37,61 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Inicializace původních dat z widgetu
     originalFactoryCartridges = List.from(widget.factoryCartridges);
     originalReloadCartridges = List.from(widget.reloadCartridges);
+
+    // Načtení kalibrů
     calibers = _getUniqueCalibers(
         [...originalFactoryCartridges, ...originalReloadCartridges]);
-    calibers.insert(0, "Vše");
-    selectedCaliber = "Vše";
+    calibers.insert(0, "Vše"); // Přidání možnosti "Vše" na začátek seznamu
+    selectedCaliber = "Vše"; // Nastavení výchozího kalibru
 
-    _loadPreferences(); // Načtení preferencí při startu aplikace
+    // Načtení uživatelských preferencí
+    _loadPreferences();
 
-    // Nastavení výchozí záložky podle preferencí
+    // Nastavení výchozí záložky na základě preferencí
     _showFactoryCartridges = _factoryLeft;
+
+    // Přidání logování inicializačních dat
+    print("Inicializační tovární náboje: $originalFactoryCartridges");
+    print("Inicializační přebíjené náboje: $originalReloadCartridges");
+
+    // Načtení a aktualizace dat z API nebo SQLite
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _refreshCartridges();
+    });
+  }
+
+  Future<void> _initializeCartridges() async {
+    setState(() {
+      _isLoading = true;
+    });
+    try {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final isOnline = connectivityResult != ConnectivityResult.none;
+
+      final fetchedCartridges = await fetchCartridges(isOnline);
+
+      setState(() {
+        originalFactoryCartridges = fetchedCartridges
+            .where((cartridge) => cartridge['type'] == 'factory')
+            .toList();
+        originalReloadCartridges = fetchedCartridges
+            .where((cartridge) => cartridge['type'] == 'reload')
+            .toList();
+        _updateCartridges(_showFactoryCartridges
+            ? originalFactoryCartridges
+            : originalReloadCartridges);
+      });
+    } catch (e) {
+      print("Chyba při inicializaci dat: $e");
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   // Načítání preference z úložiště
@@ -274,7 +318,18 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     } catch (error) {
       print("Chyba při obnově dat: $error");
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Obnova dat se nezdařila.')),
+        SnackBar(
+          content: Text(
+            'Obnova dat se nezdařila. Zkontrolujte připojení k internetu nebo zkuste znovu později.',
+          ),
+          action: SnackBarAction(
+            label: 'Zkusit znovu',
+            onPressed: () {
+              _refreshCartridges(); // Opakovaný pokus o obnovu dat
+            },
+          ),
+          duration: Duration(seconds: 5), // Doba zobrazení zprávy
+        ),
       );
     } finally {
       setState(() {
@@ -633,9 +688,15 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
         final name = cartridge['name'] ?? 'Neznámý náboj';
 
         // Získání kalibru a skladové dostupnosti
-        final caliberName = cartridge.containsKey('caliber_name')
+        final caliberName = cartridge.containsKey('caliber_name') &&
+                cartridge['caliber_name'] != null
             ? cartridge['caliber_name']
-            : (cartridge['caliber']?['name'] ?? 'Neznámý kalibr');
+            : (cartridge.containsKey('caliber') &&
+                    cartridge['caliber'] != null &&
+                    cartridge['caliber']['name'] != null
+                ? cartridge['caliber']['name']
+                : 'Neznámý kalibr');
+
         final stock = cartridge['stock_quantity'] ?? 0;
 
         // Získání informace o čárovém kódu
@@ -652,21 +713,22 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
             ),
             subtitle: Row(
               children: [
-                // Nová ikona kalibru
                 Icon(Icons.adjust, size: 16, color: Colors.blueGrey),
                 const SizedBox(width: 4),
-                Text(caliberName, style: const TextStyle(fontSize: 14)),
-
+                Expanded(
+                  child: Text(caliberName,
+                      style: const TextStyle(fontSize: 14),
+                      overflow: TextOverflow.ellipsis),
+                ),
                 const SizedBox(width: 16),
-
-                // Ikona skladu
                 const Icon(Icons.inventory_2, size: 16, color: Colors.grey),
                 const SizedBox(width: 4),
-                Text('$stock ks', style: const TextStyle(fontSize: 14)),
-
+                Expanded(
+                  child: Text('$stock ks',
+                      style: const TextStyle(fontSize: 14),
+                      overflow: TextOverflow.ellipsis),
+                ),
                 const Spacer(),
-
-                // Ikona čárového kódu, pokud existuje
                 if (hasBarcode)
                   const Icon(Icons.qr_code, size: 20, color: Colors.blueGrey),
               ],

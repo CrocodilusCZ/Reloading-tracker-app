@@ -17,8 +17,17 @@ class DatabaseHelper {
   DatabaseHelper._internal();
 
   // Statická metoda pro získání zbraní
-  static Future<List<Map<String, dynamic>>> getWeapons() async {
+  static Future<List<Map<String, dynamic>>> getWeapons({int? caliberId}) async {
     final db = await DatabaseHelper().database;
+    if (caliberId != null) {
+      // Filtrování zbraní podle caliberId
+      return await db.query(
+        'weapons',
+        where: 'caliber_id = ?',
+        whereArgs: [caliberId],
+      );
+    }
+    // Pokud caliberId není zadáno, vrátí všechny zbraně
     return await db.query('weapons');
   }
 

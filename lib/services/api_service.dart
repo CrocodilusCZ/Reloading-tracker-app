@@ -7,8 +7,9 @@ import 'package:shooting_companion/helpers/database_helper.dart';
 
 class ApiService {
   // static const String baseUrl = 'http://10.0.2.2:8000/api';
-  static const String baseUrl = 'http://127.0.0.1:8000/api';
+  //static const String baseUrl = 'http://127.0.0.1:8000/api';
   //static const String baseUrl = 'http://10.20.0.69:8000/api';
+  static final String baseUrl = 'https://www.reloading-tracker.cz/api';
 
   static Future<bool> isOnline() async {
     var connectivityResult = await Connectivity().checkConnectivity();
@@ -735,7 +736,8 @@ class ApiService {
   }
 
   // Volání API pro získání zbraní uživatele podle kalibru
-  static Future<List<dynamic>> getUserWeaponsByCaliber(int caliberId) async {
+  static Future<List<Map<String, dynamic>>> getUserWeaponsByCaliber(
+      int caliberId) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('api_token');
 
@@ -749,10 +751,10 @@ class ApiService {
 
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/weapons/by-caliber/$caliberId'), // Opravená URL
+        Uri.parse('$baseUrl/weapons/by-caliber/$caliberId'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token', // Přidání tokenu pro ověření
+          'Authorization': 'Bearer $token',
         },
       );
 
@@ -764,7 +766,7 @@ class ApiService {
         try {
           final List<dynamic> weapons = jsonDecode(response.body);
           print('Počet načtených zbraní: ${weapons.length}');
-          return weapons;
+          return weapons.cast<Map<String, dynamic>>();
         } catch (e) {
           print('Chyba při zpracování JSON odpovědi: $e');
           throw Exception('Failed to parse weapons JSON.');
