@@ -8,6 +8,7 @@ import 'package:shooting_companion/helpers/database_helper.dart';
 class ApiService {
   // static const String baseUrl = 'http://10.0.2.2:8000/api';
   static const String baseUrl = 'http://127.0.0.1:8000/api';
+  //static const String baseUrl = 'http://10.20.0.69:8000/api';
 
   static Future<bool> isOnline() async {
     var connectivityResult = await Connectivity().checkConnectivity();

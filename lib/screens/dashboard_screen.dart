@@ -23,6 +23,7 @@ import 'package:shooting_companion/widgets/custom_button.dart';
 import 'package:shooting_companion/widgets/header_widget.dart';
 import 'package:shooting_companion/helpers/snackbar_helper.dart';
 import 'package:shooting_companion/helpers/connectivity_helper.dart';
+import 'package:shooting_companion/services/sync_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -41,11 +42,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool isSyncing = false; // Stav synchronizace
   late StreamSubscription<ConnectivityResult> _connectivitySubscription;
   late ConnectivityMonitor _connectivityMonitor;
+  late SyncService _syncService;
 
   @override
   void initState() {
     super.initState();
     username = widget.username;
+
+    // Inicializace SyncService
+    _syncService = SyncService(context);
 
     _connectivityMonitor = ConnectivityMonitor(
       context: context,
@@ -56,14 +61,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         // Synchronizace při obnovení připojení
         if (isOnline) {
-          _syncOfflineRequests();
+          _syncService.syncOfflineRequests().then((_) {
+            print("Offline požadavky byly synchronizovány.");
+          }).catchError((e) {
+            print("Chyba při synchronizaci offline požadavků: $e");
+          });
         }
       },
     );
     _connectivityMonitor.startMonitoring(); // Spuštění sledování připojení
 
     // Inicializace _cartridgesFuture pro načtení dat
-    _cartridgesFuture = _syncWithApi().then((_) async {
+    _cartridgesFuture = _syncService.syncWithApi().then((_) async {
       try {
         // Načti data ze SQLite nebo jiného zdroje po synchronizaci
         final cartridgesFromSQLite =
@@ -211,18 +220,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // Synchronizace kalibrů
-  Future<void> syncCalibers() async {
-    try {
-      final calibers = await ApiService.getCalibers(); // Načtení kalibrů z API
-      await DatabaseHelper()
-          .syncCalibersFromApi(calibers); // Synchronizace do SQLite
-      print("Kalibry byly úspěšně synchronizovány.");
-    } catch (e) {
-      print("Chyba při synchronizaci kalibrů: $e");
-    }
-  }
-
   Future<void> _initializeDashboard() async {
     try {
       setState(() {
@@ -335,189 +332,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (e) {
       SnackbarHelper.show(context, 'Chyba při načítání střelnic.');
     }
-  }
-
-  Future<void> _syncDataAfterLogin() async {
-    try {
-      await _syncWithApi();
-    } catch (e) {
-      SnackbarHelper.show(context, 'Chyba při synchronizaci s API: $e');
-    }
-
-    // Pokusíme se synchronizovat offline požadavky
-    await _syncOfflineRequests();
-  }
-
-  Future<void> _syncWithApi() async {
-    try {
-      print('Synchronizace: Začínám synchronizaci všech dat.');
-
-      // Vytvoření instance DatabaseHelper
-      final dbHelper = DatabaseHelper();
-
-      // Synchronizace střelnic
-      try {
-        print('Synchronizuji střelnice...');
-        final ranges = await ApiService.getUserRanges();
-        print('Načteno střelnic z API: ${ranges.length}');
-        await dbHelper.syncRangesFromApi(ranges);
-        print('Střelnice uloženy do SQLite. Počet střelnic: ${ranges.length}');
-      } catch (e) {
-        print('Chyba při synchronizaci střelnic: $e');
-      }
-
-      // Synchronizace nábojů
-      try {
-        print('Synchronizuji náboje...');
-        final cartridges = await ApiService.getAllCartridges();
-        print(
-            'Načteno nábojů z API: ${cartridges.values.expand((x) => x).length}');
-        await dbHelper.syncCartridgesFromApi(
-            [...?cartridges['factory'], ...?cartridges['reload']]);
-        print('Náboje uloženy do SQLite.');
-      } catch (e) {
-        print('Chyba při synchronizaci nábojů: $e');
-      }
-
-      // Synchronizace kalibrů
-      try {
-        print('Synchronizuji kalibry...');
-        final calibers = await ApiService.getCalibers();
-        print('Načteno kalibrů z API: ${calibers.length}');
-        await dbHelper.syncCalibersFromApi(calibers);
-        print('Kalibry uloženy do SQLite. Počet kalibrů: ${calibers.length}');
-      } catch (e) {
-        print('Chyba při synchronizaci kalibrů: $e');
-      }
-
-      // Synchronizace aktivit
-      try {
-        print('Synchronizuji aktivity...');
-        final activities = await ApiService.getUserActivities();
-        print('Načteno aktivit z API: ${activities.length}');
-        for (var activity in activities) {
-          print('Ukládám aktivitu do SQLite: $activity');
-          await dbHelper.insertOrUpdate('activities', activity);
-        }
-        print('Aktivity uloženy do SQLite.');
-      } catch (e) {
-        print('Chyba při synchronizaci aktivit: $e');
-      }
-
-      // Synchronizace zbraní
-      try {
-        print('Synchronizuji zbraně...');
-        final weapons = await ApiService.getUserWeapons();
-        print('Načteno zbraní z API: ${weapons.length}');
-
-        // Přetypování na List<Map<String, dynamic>>
-        final weaponList = weapons.map((weapon) {
-          if (weapon is Map<String, dynamic>) {
-            return weapon;
-          } else {
-            throw Exception('Invalid weapon data: $weapon');
-          }
-        }).toList();
-
-        for (var weapon in weaponList) {
-          print('Ukládám zbraň do SQLite: $weapon');
-        }
-        await dbHelper.saveWeapons(weaponList); // Předání správného typu
-        print('Zbraně uloženy do SQLite.');
-      } catch (e) {
-        print('Chyba při synchronizaci zbraní: $e');
-      }
-
-      print('Synchronizace všech dat dokončena.');
-      SnackbarHelper.show(context, 'Data byla úspěšně synchronizována.');
-    } catch (e) {
-      // Zpracování chyb v hlavním bloku
-      print('Chyba při synchronizaci všech dat: $e');
-      SnackbarHelper.show(context, 'Chyba při synchronizaci všech dat: $e');
-    } finally {
-      // Kód, který se vždy provede
-      print('Synchronizace dokončena.');
-    }
-  }
-
-  // Synchronizace neodeslaných požadavků
-  Future<void> _syncOfflineRequests() async {
-    final db = await DatabaseHelper().database;
-
-    // Přidán log pro začátek synchronizace_syncWithApi
-    print('Začínám synchronizaci offline požadavků...');
-
-    // Načtení všech "pending" požadavků
-    final requests = await db.query(
-      'offline_requests',
-      where: 'status = ?',
-      whereArgs: ['pending'],
-    );
-
-    print('Načteno ${requests.length} offline požadavků k synchronizaci.');
-
-    for (var request in requests) {
-      final requestType = request['request_type'];
-      final rawData = request['data']; // Hodnota může být Object?
-
-      if (rawData is! String) {
-        print('Chyba: Hodnota dat v požadavku není typu String: $rawData');
-        continue;
-      }
-
-      try {
-        final requestData = jsonDecode(rawData); // Zpracuj pouze validní String
-
-        // Přidán log pro aktuální typ požadavku
-        print(
-            'Synchronizuji požadavek ID ${request['id']} typu $requestType s daty: $requestData');
-
-        // Rozhodni se podle typu požadavku
-        switch (requestType) {
-          case 'update_stock':
-            print(
-                'Provádím synchronizaci zásoby pro cartridge ID ${requestData['id']} s množstvím ${requestData['quantity']}');
-            await ApiService.syncRequest(
-              '/cartridges/${requestData['id']}/update-stock',
-              {'quantity': requestData['quantity']},
-            );
-            break;
-
-          case 'create_activity':
-            print('Vytvářím aktivitu s daty: $requestData');
-            await ApiService.syncRequest(
-              '/activities',
-              requestData,
-            );
-            break;
-
-          case 'delete_activity':
-            print('Mažu aktivitu s ID ${requestData['id']}');
-            await ApiService.syncRequest(
-              '/activities/${requestData['id']}/delete',
-              {},
-            );
-            break;
-
-          default:
-            print('Neznámý typ požadavku: $requestType');
-            continue;
-        }
-
-        // Po úspěchu nastav status na "completed"
-        await db.update(
-          'offline_requests',
-          {'status': 'completed'},
-          where: 'id = ?',
-          whereArgs: [request['id']],
-        );
-
-        print('Požadavek ID ${request['id']} byl synchronizován úspěšně.');
-      } catch (e) {
-        print('Chyba při synchronizaci požadavku ID ${request['id']}: $e');
-      }
-    }
-    print('Synchronizace offline požadavků dokončena.');
   }
 
   void _showSyncSnackBar(String message) {
