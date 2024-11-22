@@ -343,15 +343,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Shooting Companion - Vítejte, $username'),
+        title: Text(
+          'Shooting Companion',
+          style: const TextStyle(
+            fontSize: 20, // Větší text
+            fontWeight: FontWeight.bold, // Tučné písmo
+            color: Colors.white, // Barva textu
+            letterSpacing: 1.2, // Mírně zvětšené mezery mezi písmeny
+            shadows: [
+              Shadow(
+                offset: Offset(2, 2), // Posunutí stínu
+                color: Colors.black54, // Barva stínu
+                blurRadius: 4, // Mírné rozmazání stínu
+              ),
+            ],
+          ),
+        ),
         centerTitle: true,
         backgroundColor: Colors.blueGrey,
         actions: [
-          Icon(
-            isOnline ? Icons.signal_wifi_4_bar : Icons.signal_wifi_off,
-            color: isOnline ? Colors.green : Colors.red,
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0), // Větší mezera vpravo
+            child: Tooltip(
+              message: isOnline ? 'Online' : 'Offline',
+              child: AnimatedSwitcher(
+                duration: const Duration(
+                    milliseconds: 300), // Jemná animace při změně
+                child: Icon(
+                  isOnline ? Icons.cloud_done : Icons.cloud_off, // Ikony Cloud
+                  key: ValueKey(isOnline), // Klíč pro přepínání ikon
+                  color: isOnline
+                      ? Colors.lightBlueAccent
+                      : Colors.grey.shade500, // Jemné barvy
+                  size: 28, // Větší velikost ikony
+                ),
+              ),
+            ),
           ),
-          const SizedBox(width: 16),
         ],
       ),
       drawer: Drawer(
@@ -365,20 +393,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.person, size: 64, color: Colors.white),
-                  SizedBox(height: 8),
                   Text(
-                    username,
+                    'Shooting Companion', // Hlavní nadpis nahoře
                     style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      fontSize: 20, // Větší velikost písma
+                      fontWeight: FontWeight.bold, // Tučné písmo
+                      color: Colors.white, // Barva textu
                     ),
                   ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Shooting_companion_0.9',
-                    style: TextStyle(fontSize: 14, color: Colors.white70),
+                  SizedBox(
+                      height: 16), // Mezera mezi nadpisem a řádkem s ikonou
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.person,
+                        size: 16, // Zmenšená ikona
+                        color: Colors.white,
+                      ),
+                      SizedBox(width: 8), // Menší mezera mezi ikonou a textem
+                      Expanded(
+                        child: Text(
+                          username,
+                          style: TextStyle(
+                            fontSize: 16, // Menší velikost písma pro nick
+                            fontWeight:
+                                FontWeight.normal, // Normální váha písma
+                            color: Colors.white70, // Světlejší barva textu
+                          ),
+                          overflow: TextOverflow
+                              .ellipsis, // Oříznutí textu při přetečení
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
