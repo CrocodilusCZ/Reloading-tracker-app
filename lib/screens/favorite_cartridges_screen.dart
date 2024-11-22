@@ -4,6 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
 import 'package:shooting_companion/screens/cartridge_detail_screen.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 List<Map<String, dynamic>> originalFactoryCartridges = [];
 List<Map<String, dynamic>> originalReloadCartridges = [];
@@ -42,6 +43,36 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
         [...originalFactoryCartridges, ...originalReloadCartridges]);
     calibers.insert(0, "Vše");
     selectedCaliber = "Vše";
+
+    _loadPreferences(); // Načtení preferencí při startu aplikace
+
+    // Nastavení výchozí záložky podle preferencí
+    _showFactoryCartridges = _factoryLeft;
+  }
+
+  // Načítání preference z úložiště
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final factoryLeft =
+        prefs.getBool('factoryLeft') ?? true; // Načtení preferencí
+
+    setState(() {
+      _factoryLeft = factoryLeft;
+      _showFactoryCartridges =
+          _factoryLeft; // Nastavení záložky na základě preferencí
+    });
+
+    // Aktualizace obsahu po načtení preferencí
+    _updateCartridges(_showFactoryCartridges
+        ? originalFactoryCartridges
+        : originalReloadCartridges);
+  }
+
+// Uložení preference do úložiště
+  Future<void> _savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(
+        'factoryLeft', _factoryLeft); // Uložení aktuální hodnoty _factoryLeft
   }
 
   void _updateCartridges(List<Map<String, dynamic>> cartridges) {
@@ -210,6 +241,48 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     }
   }
 
+  Future<void> _refreshCartridges() async {
+    setState(() {
+      _isLoading = true; // Nastavení indikátoru načítání
+    });
+
+    try {
+      // Kontrola připojení k internetu
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final isOnline = connectivityResult != ConnectivityResult.none;
+
+      // Načtení dat (online nebo offline)
+      final fetchedCartridges = await fetchCartridges(isOnline);
+
+      setState(() {
+        // Aktualizace původních seznamů nábojů
+        originalFactoryCartridges = fetchedCartridges
+            .where((cartridge) => cartridge['type'] == 'factory')
+            .toList();
+        originalReloadCartridges = fetchedCartridges
+            .where((cartridge) => cartridge['type'] == 'reload')
+            .toList();
+
+        // Aktualizace viditelných nábojů
+        _updateCartridges(_showFactoryCartridges
+            ? originalFactoryCartridges
+            : originalReloadCartridges);
+
+        // Aktualizace seznamu kalibrů
+        _updateCalibers();
+      });
+    } catch (error) {
+      print("Chyba při obnově dat: $error");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Obnova dat se nezdařila.')),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false; // Vypnutí indikátoru načítání
+      });
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchCartridgesFromSQLite() async {
     final db = await DatabaseHelper().database;
 
@@ -305,73 +378,113 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: PageStorage(
-        bucket: _bucket,
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
-                children: [
-                  _buildToggleButtons(),
-                  _buildZeroStockSwitch(),
-                  _buildCaliberDropdown(),
-                  Expanded(child: _buildCartridgeList()),
-                ],
-              ),
+      body: RefreshIndicator(
+        onRefresh: _refreshCartridges, // Přidání callbacku pro obnovu dat
+        child: PageStorage(
+          bucket: _bucket,
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : Column(
+                  children: [
+                    _buildToggleButtons(),
+                    _buildZeroStockSwitch(),
+                    _buildCaliberDropdown(),
+                    Expanded(child: _buildCartridgeList()),
+                  ],
+                ),
+        ),
       ),
     );
   }
 
   Widget _buildToggleButtons() {
     return Card(
-      elevation: 3,
-      color: Colors.grey.shade200,
+      elevation: 4,
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Center(
-          child: Column(
-            children: [
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                transitionBuilder: (child, animation) {
-                  return FadeTransition(opacity: animation, child: child);
-                },
-                child: Text(
-                  _showFactoryCartridges
-                      ? 'Zobrazuji tovární náboje'
-                      : 'Zobrazuji přebíjené náboje',
-                  key: ValueKey<bool>(_showFactoryCartridges),
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold),
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Tlačítka
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onLongPress: _swapToggleButtons, // Funkce přehodí tlačítka
+                    child: _buildStyledButton(
+                      icon: _factoryLeft
+                          ? Icons.factory_outlined
+                          : Icons.build_circle_outlined,
+                      label: _factoryLeft ? 'Tovární' : 'Přebíjené',
+                      isActive: _factoryLeft == _showFactoryCartridges,
+                      onPressed: () {
+                        setState(() {
+                          _showFactoryCartridges = _factoryLeft;
+                          _updateCartridges(_showFactoryCartridges
+                              ? originalFactoryCartridges
+                              : originalReloadCartridges);
+                        });
+                      },
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              ToggleButtons(
-                borderRadius: BorderRadius.circular(10),
-                selectedColor: Colors.white,
-                fillColor: Colors.blueGrey,
-                color: Colors.blueGrey,
-                isSelected: _factoryLeft
-                    ? [_showFactoryCartridges, !_showFactoryCartridges]
-                    : [!_showFactoryCartridges, _showFactoryCartridges],
-                onPressed: (index) {
-                  setState(() {
-                    // Logika výběru závisí na aktuálním pořadí tlačítek
-                    if (_factoryLeft) {
-                      _showFactoryCartridges = index == 0;
-                    } else {
-                      _showFactoryCartridges = index == 1;
-                    }
-                    _updateCartridges(_showFactoryCartridges
-                        ? originalFactoryCartridges
-                        : originalReloadCartridges);
-                  });
-                },
-                children: _buildToggleChildren(),
-              ),
-            ],
-          ),
+                const SizedBox(width: 16), // Mezera mezi tlačítky
+                Expanded(
+                  child: GestureDetector(
+                    onLongPress: _swapToggleButtons, // Funkce přehodí tlačítka
+                    child: _buildStyledButton(
+                      icon: _factoryLeft
+                          ? Icons.build_circle_outlined
+                          : Icons.factory_outlined,
+                      label: _factoryLeft ? 'Přebíjené' : 'Tovární',
+                      isActive: _factoryLeft != _showFactoryCartridges,
+                      onPressed: () {
+                        setState(() {
+                          _showFactoryCartridges = !_factoryLeft;
+                          _updateCartridges(_showFactoryCartridges
+                              ? originalFactoryCartridges
+                              : originalReloadCartridges);
+                        });
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
+    );
+  }
+
+  Widget _buildStyledButton({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required VoidCallback onPressed,
+  }) {
+    return ElevatedButton.icon(
+      icon: Icon(
+        icon,
+        color: isActive ? Colors.white : Colors.blueGrey,
+      ),
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isActive ? Colors.white : Colors.blueGrey,
+          fontSize: 14,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        elevation: isActive ? 4 : 0,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        backgroundColor: isActive ? Colors.blueGrey : Colors.grey[200],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      onPressed: onPressed,
     );
   }
 
@@ -403,7 +516,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
 
   void _swapToggleButtons() {
     setState(() {
-      // Změna pořadí tlačítek
+      // Přehodí pořadí tlačítek
       _factoryLeft = !_factoryLeft;
 
       // Zachování aktuálního výběru při prohození
@@ -413,6 +526,9 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
       _updateCartridges(_showFactoryCartridges
           ? originalFactoryCartridges
           : originalReloadCartridges);
+
+      // Uložení preference po změně
+      _savePreferences();
 
       // Zpětná vazba pro uživatele
       ScaffoldMessenger.of(context).showSnackBar(
@@ -530,11 +646,14 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
           margin: const EdgeInsets.symmetric(vertical: 8),
           elevation: 3,
           child: ListTile(
-            title: Text(name),
+            title: Text(
+              name,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
             subtitle: Row(
               children: [
-                // Ikona kalibru
-                const Icon(Icons.linear_scale, size: 16, color: Colors.grey),
+                // Nová ikona kalibru
+                Icon(Icons.adjust, size: 16, color: Colors.blueGrey),
                 const SizedBox(width: 4),
                 Text(caliberName, style: const TextStyle(fontSize: 14)),
 
