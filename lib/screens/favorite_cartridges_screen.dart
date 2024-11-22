@@ -31,6 +31,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   String? selectedCaliber;
   List<String> calibers = [];
   bool _isLoading = false;
+  bool _factoryLeft = true; // Pořadí tlačítek
 
   @override
   void initState() {
@@ -304,10 +305,6 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Inventář Nábojů'),
-        backgroundColor: Colors.blueGrey,
-      ),
       body: PageStorage(
         bucket: _bucket,
         child: _isLoading
@@ -325,11 +322,6 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   }
 
   Widget _buildToggleButtons() {
-    // Pořadí tlačítek na základě stavu
-    final toggleLabels = _showFactoryCartridges
-        ? ['Tovární', 'Přebíjené']
-        : ['Přebíjené', 'Tovární'];
-
     return Card(
       elevation: 3,
       color: Colors.grey.shade200,
@@ -345,8 +337,8 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
                 },
                 child: Text(
                   _showFactoryCartridges
-                      ? 'Tovární náboje'
-                      : 'Přebíjené náboje',
+                      ? 'Zobrazuji tovární náboje'
+                      : 'Zobrazuji přebíjené náboje',
                   key: ValueKey<bool>(_showFactoryCartridges),
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold),
@@ -358,33 +350,23 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
                 selectedColor: Colors.white,
                 fillColor: Colors.blueGrey,
                 color: Colors.blueGrey,
-                isSelected: [
-                  _showFactoryCartridges,
-                  !_showFactoryCartridges,
-                ],
+                isSelected: _factoryLeft
+                    ? [_showFactoryCartridges, !_showFactoryCartridges]
+                    : [!_showFactoryCartridges, _showFactoryCartridges],
                 onPressed: (index) {
                   setState(() {
-                    _showFactoryCartridges = index == 0;
+                    // Logika výběru závisí na aktuálním pořadí tlačítek
+                    if (_factoryLeft) {
+                      _showFactoryCartridges = index == 0;
+                    } else {
+                      _showFactoryCartridges = index == 1;
+                    }
                     _updateCartridges(_showFactoryCartridges
                         ? originalFactoryCartridges
                         : originalReloadCartridges);
                   });
                 },
-                children: toggleLabels.map((label) {
-                  return GestureDetector(
-                    onLongPress: () {
-                      HapticFeedback.mediumImpact(); // Vibrace
-                      _swapToggleButtons(); // Přepnutí pořadí tlačítek
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        label,
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  );
-                }).toList(),
+                children: _buildToggleChildren(),
               ),
             ],
           ),
@@ -393,29 +375,52 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     );
   }
 
+  List<Widget> _buildToggleChildren() {
+    final leftButton = GestureDetector(
+      onLongPress: _swapToggleButtons,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Text(
+          _factoryLeft ? 'Tovární' : 'Přebíjené',
+          style: const TextStyle(fontSize: 16),
+        ),
+      ),
+    );
+
+    final rightButton = GestureDetector(
+      onLongPress: _swapToggleButtons,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Text(
+          _factoryLeft ? 'Přebíjené' : 'Tovární',
+          style: const TextStyle(fontSize: 16),
+        ),
+      ),
+    );
+
+    return [leftButton, rightButton];
+  }
+
   void _swapToggleButtons() {
     setState(() {
-      // Přepnutí pořadí tlačítek
+      // Změna pořadí tlačítek
+      _factoryLeft = !_factoryLeft;
+
+      // Zachování aktuálního výběru při prohození
       _showFactoryCartridges = !_showFactoryCartridges;
 
-      // Prohodit data mezi továrními a přebíjenými náboji
-      var tempCartridges =
-          List<Map<String, dynamic>>.from(widget.factoryCartridges);
-      widget.factoryCartridges.clear();
-      widget.factoryCartridges.addAll(widget.reloadCartridges);
-      widget.reloadCartridges.clear();
-      widget.reloadCartridges.addAll(tempCartridges);
+      // Aktualizace obsahu
+      _updateCartridges(_showFactoryCartridges
+          ? originalFactoryCartridges
+          : originalReloadCartridges);
 
-      // Aktualizace kalibrů pro novou záložku
-      _updateCalibers();
-
-      // Vizualizace animace
+      // Zpětná vazba pro uživatele
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            _showFactoryCartridges
-                ? 'Tlačítka přesunuta: Tovární vlevo'
-                : 'Tlačítka přesunuta: Přebíjené vlevo',
+            _factoryLeft
+                ? 'Tlačítka přehodnocena: Tovární vlevo, Přebíjené vpravo'
+                : 'Tlačítka přehodnocena: Přebíjené vlevo, Tovární vpravo',
           ),
           duration: const Duration(milliseconds: 800),
         ),
