@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:shooting_companion/screens/dashboard_screen.dart';
 import 'package:shooting_companion/screens/login_screen.dart';
 
+// Globální klíč pro ScaffoldMessenger
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
 void main() {
   runApp(const ShootingCompanionApp());
 }
@@ -12,6 +16,7 @@ class ShootingCompanionApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      scaffoldMessengerKey: scaffoldMessengerKey, // Připojení klíče
       title: 'Shooting Companion', // Změněný název aplikace
       theme: ThemeData(
         primarySwatch: Colors.blue,

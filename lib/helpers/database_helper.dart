@@ -135,7 +135,10 @@ class DatabaseHelper {
   }
 
   Future<void> addOfflineRequest(
-      String requestType, Map<String, dynamic> requestData) async {
+    BuildContext context,
+    String requestType,
+    Map<String, dynamic> requestData,
+  ) async {
     final db = await database;
 
     try {
@@ -149,6 +152,9 @@ class DatabaseHelper {
         },
       );
       print('Požadavek typu $requestType byl přidán do offline_requests.');
+
+      // Zavření dialogu (pokud je potřeba)
+      Navigator.pop(context);
     } catch (e) {
       print('Chyba při přidávání offline požadavku: $e');
     }
@@ -218,6 +224,19 @@ class DatabaseHelper {
                 SnackBar(
                   content:
                       Text("Aktivita ID ${requestData['id']} byla smazána."),
+                  backgroundColor: Colors.green,
+                  duration: Duration(seconds: 3),
+                ),
+              );
+              break;
+
+            case 'create_shooting_log':
+              print("Synchronizuji střelecký záznam: $requestData");
+              await ApiService.syncRequest('/shooting_logs', requestData);
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Střelecký záznam úspěšně synchronizován."),
                   backgroundColor: Colors.green,
                   duration: Duration(seconds: 3),
                 ),

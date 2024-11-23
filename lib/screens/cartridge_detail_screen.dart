@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shooting_companion/main.dart';
 import 'package:shooting_companion/services/api_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sqflite/sqflite.dart';
@@ -9,6 +10,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert'; // Pro práci s JSON daty
 import 'package:shooting_companion/services/api_service.dart';
 import 'package:shooting_companion/services/weapon_service.dart';
+import 'package:shooting_companion/services/sync_service.dart';
+import 'dart:convert';
 
 Future<bool> isOnline() async {
   var connectivityResult = await (Connectivity().checkConnectivity());
@@ -480,7 +483,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                             response['newStock'];
                       });
 
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessengerKey.currentState?.showSnackBar(
                         SnackBar(
                           content: Text(
                               'Skladová zásoba byla úspěšně aktualizována na ${response['newStock']} ks.'),
@@ -495,16 +498,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                   } catch (e) {
                     print('Chyba při navýšení zásob: $e');
 
-                    // Pokud dojde k chybě při pokusu o navýšení online, uložit požadavek do offline_requests
-                    await DatabaseHelper().addOfflineRequest(
-                      'update_stock',
-                      {
-                        'id': widget.cartridge['id'],
-                        'quantity': quantity,
-                      },
-                    );
-
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    scaffoldMessengerKey.currentState?.showSnackBar(
                       const SnackBar(
                           content: Text(
                               'Navýšení zásob bylo uloženo pro synchronizaci později.')),
@@ -530,7 +524,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
 
   Future<void> _showShootingLogForm(BuildContext context) async {
     if (userWeapons.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      scaffoldMessengerKey.currentState?.showSnackBar(
         const SnackBar(
           content: Text('Žádné zbraně nebyly nalezeny pro tento kalibr.'),
         ),
@@ -603,7 +597,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                     if (selectedWeapon == null ||
                         ammoCountController.text.isEmpty ||
                         dateController.text.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessengerKey.currentState?.showSnackBar(
                         const SnackBar(
                           content: Text('Vyplňte všechna povinná pole!'),
                         ),
@@ -614,9 +608,9 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                     // Připrav data pro API nebo offline požadavek
                     final shootingLogData = {
                       'weapon_id': int.parse(selectedWeapon!),
-                      'activity_type': 'Střelba', // Typ aktivity
+                      'activity_type': 'Střelba',
                       'date': dateController.text,
-                      'range': null, // Střelnice (volitelné)
+                      'range': null,
                       'shots_fired':
                           int.tryParse(ammoCountController.text) ?? 0,
                       'cartridge_id': widget.cartridge['id'],
@@ -630,42 +624,50 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                         final response =
                             await ApiService.createShootingLog(shootingLogData);
 
-                        print('Záznam úspěšně vytvořen: $response');
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                                'Záznam byl úspěšně uložen do střeleckého deníku.'),
-                          ),
-                        );
-                        Navigator.pop(context); // Zavření dialogu
+                        if (response != null && response['success'] == true) {
+                          print('Záznam úspěšně vytvořen: $response');
+
+                          scaffoldMessengerKey.currentState?.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Záznam byl úspěšně uložen do střeleckého deníku.'),
+                            ),
+                          );
+                          Navigator.pop(context); // Zavření dialogu
+                        } else {
+                          // Pokud API vrátí neúspěch
+                          throw Exception('API nevrátilo úspěšnou odpověď.');
+                        }
                       } catch (e) {
-                        // Při chybě ulož požadavek offline
                         print('Chyba při odesílání záznamu: $e');
-                        await DatabaseHelper().addOfflineRequest(
-                          'create_shooting_log',
-                          shootingLogData,
-                        );
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                                'Došlo k chybě při odesílání. Požadavek byl uložen pro offline synchronizaci.'),
-                          ),
-                        );
+
+                        // Offline režim: Ulož požadavek lokálně
+                        try {
+                          await DatabaseHelper().addOfflineRequest(
+                            context, // Kontext, pokud je třeba
+                            'create_shooting_log', // Typ požadavku
+                            shootingLogData, // Data požadavku
+                          );
+                          print(
+                              'Požadavek byl úspěšně uložen do offline_requests.');
+                        } catch (error) {
+                          print('Chyba při ukládání požadavku offline: $error');
+                        }
                       }
                     } else {
                       // Offline režim: Ulož požadavek lokálně
                       print('Offline režim: Ukládám požadavek lokálně.');
-                      await DatabaseHelper().addOfflineRequest(
-                        'create_shooting_log',
-                        shootingLogData,
-                      );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                              'Požadavek byl uložen pro synchronizaci při připojení k internetu.'),
-                        ),
-                      );
-                      Navigator.pop(context); // Zavření dialogu
+                      try {
+                        await DatabaseHelper().addOfflineRequest(
+                          context, // Kontext, pokud je třeba
+                          'create_shooting_log', // Typ požadavku
+                          shootingLogData, // Data požadavku
+                        );
+                        print(
+                            'Požadavek byl úspěšně uložen do offline_requests.');
+                      } catch (error) {
+                        print('Chyba při ukládání požadavku offline: $error');
+                      }
                     }
                   },
                   child: const Text('Uložit'),

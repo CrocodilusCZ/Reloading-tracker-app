@@ -183,6 +183,14 @@ class SyncService {
             );
             break;
 
+          case 'create_shooting_log':
+            print('Vytvářím střelecký záznam s daty: $requestData');
+            await ApiService.syncRequest(
+              '/shooting-logs',
+              requestData,
+            );
+            break;
+
           default:
             print('Neznámý typ požadavku: $requestType');
             continue;

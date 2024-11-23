@@ -109,9 +109,9 @@ class ApiService {
       throw Exception('Token nebyl nalezen. Přihlas se.');
     }
 
-    // Oprava klíče 'quantity' na 'amount'
+    // Oprava klíče 'quantity' na 'amount', pokud existuje
     if (data.containsKey('quantity')) {
-      data['amount'] = data.remove('quantity');
+      data['amount'] = data.remove('quantity'); // Opravená závorka
     }
 
     try {
@@ -119,6 +119,7 @@ class ApiService {
         Uri.parse('$baseUrl$endpoint'),
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json', // Přidání hlavičky Accept
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode(data),
@@ -127,7 +128,7 @@ class ApiService {
       print("Požadavek na $endpoint: Status Code ${response.statusCode}");
       print("Odeslaná data: $data");
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         final responseData = jsonDecode(response.body);
         print("Odpověď API: $responseData");
 
