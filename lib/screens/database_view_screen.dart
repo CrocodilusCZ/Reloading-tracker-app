@@ -46,6 +46,7 @@ class _DatabaseViewScreenState extends State<DatabaseViewScreen> {
               'cartridges',
               'calibers',
               'offline_requests',
+              'weapon_calibers',
             ].map((table) {
               return PopupMenuItem(
                 value: table,

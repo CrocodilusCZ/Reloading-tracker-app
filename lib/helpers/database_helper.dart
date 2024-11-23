@@ -48,17 +48,56 @@ class DatabaseHelper {
             continue;
           }
 
+          // Uložení samotné zbraně
           await txn.insert(
             'weapons',
-            weapon,
+            {
+              'id': weapon['id'],
+              'user_id': weapon['user_id'],
+              'name': weapon['name'],
+              'created_at': weapon['created_at'],
+              'updated_at': weapon['updated_at'],
+              'initial_shots': weapon['initial_shots'] ?? 0,
+            },
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
           print("Uložena zbraň: ${weapon['name']} (ID: ${weapon['id']})");
+
+          // Zpracování a uložení kalibrů zbraně
+          if (weapon.containsKey('calibers') && weapon['calibers'] is List) {
+            final calibers = weapon['calibers'] as List;
+
+            // Nejprve smažeme staré kalibry této zbraně
+            await txn.delete(
+              'weapon_calibers',
+              where: 'weapon_id = ?',
+              whereArgs: [weapon['id']],
+            );
+
+            // Poté vložíme nové kalibry
+            for (var caliber in calibers) {
+              if (caliber['id'] == null) {
+                print("Neplatný kalibr: $caliber - přeskočeno.");
+                continue;
+              }
+
+              await txn.insert(
+                'weapon_calibers',
+                {
+                  'weapon_id': weapon['id'],
+                  'caliber_id': caliber['id'],
+                },
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
+              print(
+                  "Propojen kalibr ID ${caliber['id']} se zbraní ID ${weapon['id']}.");
+            }
+          }
         }
       });
-      print("Všechny zbraně byly uloženy.");
+      print("Všechny zbraně a jejich kalibry byly uloženy.");
     } catch (e) {
-      print("Chyba při ukládání zbraní: $e");
+      print("Chyba při ukládání zbraní a jejich kalibrů: $e");
     }
   }
 
@@ -640,28 +679,38 @@ class DatabaseHelper {
       print("Tabulka cartridges vytvořena.");
 
       await db.execute('''CREATE TABLE IF NOT EXISTS calibers (
-      id INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      bullet_diameter TEXT,
-      case_length TEXT,
-      max_pressure TEXT,
-      user_id INTEGER,
-      is_global INTEGER DEFAULT 0,
-      created_at DATETIME,
-      updated_at DATETIME
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        bullet_diameter TEXT,
+        case_length TEXT,
+        max_pressure TEXT,
+        user_id INTEGER,
+        is_global INTEGER DEFAULT 0,
+        created_at DATETIME,
+        updated_at DATETIME
     )''');
       print("Tabulka calibers vytvořena.");
 
       await db.execute('''CREATE TABLE IF NOT EXISTS weapons (
-  id INTEGER PRIMARY KEY,
-  user_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
-  created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL,
-  initial_shots INTEGER DEFAULT 0
-)''');
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        initial_shots INTEGER DEFAULT 0
+      )''');
       print("Tabulka weapons vytvořena.");
+
+      // Nová tabulka pro vztah mezi zbraněmi a kalibry
+      await db.execute('''CREATE TABLE IF NOT EXISTS weapon_calibers (
+        weapon_id INTEGER NOT NULL,
+        caliber_id INTEGER NOT NULL,
+        PRIMARY KEY (weapon_id, caliber_id),
+        FOREIGN KEY (weapon_id) REFERENCES weapons (id),
+        FOREIGN KEY (caliber_id) REFERENCES calibers (id)
+      )''');
+      print("Tabulka weapon_calibers vytvořena.");
 
       await db.execute('''CREATE TABLE IF NOT EXISTS requests (
         id INTEGER PRIMARY KEY,
