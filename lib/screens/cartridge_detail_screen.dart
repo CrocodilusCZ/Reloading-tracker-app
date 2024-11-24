@@ -541,47 +541,49 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
             TextButton(
               onPressed: () async {
                 int quantity = int.tryParse(quantityController.text) ?? 0;
-                Navigator.pop(dialogContext); // Zavření dialogu
+                Navigator.pop(dialogContext);
                 if (quantity > 0) {
-                  try {
-                    final cartridgeId = widget.cartridge['id'];
-                    print(
-                        'Navýšení zásob: ID: $cartridgeId, Množství: $quantity');
+                  final cartridgeId = widget.cartridge['id'];
+                  print(
+                      'Navýšení zásob: ID: $cartridgeId, Množství: $quantity');
 
-                    // Aktualizace zásob na serveru (API volání)
-                    final response = await ApiService.increaseCartridge(
-                      cartridgeId,
-                      quantity,
-                    );
-
-                    if (response.containsKey('newStock')) {
-                      setState(() {
-                        // Použij nové množství z odpovědi API
-                        cartridgeDetails?['stock_quantity'] =
-                            response['newStock'];
-                        widget.cartridge['stock_quantity'] =
-                            response['newStock'];
-                      });
-
+                  bool online = await isOnline();
+                  if (online) {
+                    try {
+                      final response = await ApiService.increaseCartridge(
+                          cartridgeId, quantity);
+                      if (response.containsKey('newStock')) {
+                        setState(() {
+                          cartridgeDetails?['stock_quantity'] =
+                              response['newStock'];
+                          widget.cartridge['stock_quantity'] =
+                              response['newStock'];
+                        });
+                        scaffoldMessengerKey.currentState?.showSnackBar(
+                          SnackBar(
+                              content: Text(
+                                  'Skladová zásoba aktualizována na ${response['newStock']} ks.')),
+                        );
+                        await _fetchData();
+                      }
+                    } catch (e) {
+                      print('Chyba při navýšení zásob: $e');
+                      await DatabaseHelper()
+                          .updateStockOffline(cartridgeId, quantity);
                       scaffoldMessengerKey.currentState?.showSnackBar(
-                        SnackBar(
-                          content: Text(
-                              'Skladová zásoba byla úspěšně aktualizována na ${response['newStock']} ks.'),
-                        ),
+                        const SnackBar(
+                            content: Text(
+                                'Změna skladu uložena pro pozdější synchronizaci')),
                       );
-
-                      // Znovu načti data, abys měl aktuální informace
-                      await _fetchData();
-                    } else {
-                      print('Odpověď API neobsahuje newStock.');
                     }
-                  } catch (e) {
-                    print('Chyba při navýšení zásob: $e');
-
+                  } else {
+                    // Offline mode - use updateStockOffline directly
+                    await DatabaseHelper()
+                        .updateStockOffline(cartridgeId, quantity);
                     scaffoldMessengerKey.currentState?.showSnackBar(
                       const SnackBar(
                           content: Text(
-                              'Navýšení zásob bylo uloženo pro synchronizaci později.')),
+                              'Změna skladu uložena pro pozdější synchronizaci')),
                     );
                   }
                 } else {
