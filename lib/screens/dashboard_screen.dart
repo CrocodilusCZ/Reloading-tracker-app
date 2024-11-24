@@ -24,6 +24,7 @@ import 'package:shooting_companion/widgets/header_widget.dart';
 import 'package:shooting_companion/helpers/snackbar_helper.dart';
 import 'package:shooting_companion/helpers/connectivity_helper.dart';
 import 'package:shooting_companion/services/sync_service.dart';
+import 'package:sqflite/sqflite.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -135,6 +136,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'reload': <Map<String, dynamic>>[],
       };
     });
+  }
+
+  void testSQLQuery() async {
+    try {
+      // Získej cestu k úložišti databází aplikace
+      final dbPath = await getDatabasesPath();
+      print('Debug: Cesta k databázím: $dbPath');
+
+      // Získej seznam všech souborů v adresáři pro databáze
+      final dbDirectory = Directory(dbPath);
+      List<FileSystemEntity> dbFiles = dbDirectory.listSync();
+
+      print('Debug: Existující databázové soubory:');
+      for (var dbFile in dbFiles) {
+        if (dbFile is File) {
+          print(' - ${path.basename(dbFile.path)}');
+        }
+      }
+
+      // Připojení ke konkrétní databázi 'reloading_tracker.db'
+      final db = await openDatabase(path.join(dbPath, 'reloading_tracker.db'));
+      print('Debug: Připojeno k databázi na adrese: ${db.path}');
+
+      // Ověření, které tabulky jsou dostupné
+      final tables = await db
+          .rawQuery('SELECT name FROM sqlite_master WHERE type="table";');
+      print('Debug: Existující tabulky: $tables');
+
+      // Ověření, zda tabulka 'weapons' existuje
+      bool weaponsTableExists =
+          tables.any((table) => table['name'] == 'weapons');
+
+      if (!weaponsTableExists) {
+        print(
+            'Warning: Tabulka weapons nebyla nalezena. Dostupné tabulky: $tables');
+
+        // Dotaz na podrobnosti o tabulkách ve `sqlite_master`
+        final detailedTables =
+            await db.rawQuery('SELECT * FROM sqlite_master;');
+        print(
+            'Debug: Podrobné informace o tabulkách ve sqlite_master: $detailedTables');
+      } else {
+        // Upravený dotaz pro ladění problému s tabulkou 'weapons'
+        final result = await db.rawQuery('''
+      SELECT 
+        weapons.id AS weapon_id,
+        weapons.name AS weapon_name,
+        calibers.id AS caliber_id,
+        calibers.name AS caliber_name
+      FROM weapons
+      LEFT JOIN weapon_calibers ON weapons.id = weapon_calibers.weapon_id
+      LEFT JOIN calibers ON weapon_calibers.caliber_id = calibers.id
+      WHERE calibers.id = 35;
+      ''');
+
+        print('Debug: Výsledky dotazu na tabulku weapons a calibers: $result');
+      }
+    } catch (e) {
+      print('Error: Chyba při dotazu do databáze: $e');
+    }
   }
 
   Future<void> _logout() async {
@@ -514,6 +575,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => DatabaseViewScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading:
+                  Icon(Icons.storage, color: Colors.indigo), // Ikona tlačítka
+              title: Text('Test SQL Dotazu'), // Text tlačítka
+              onTap: () {
+                Navigator.of(context).pop(); // Zavře Drawer
+                testSQLQuery(); // Volání bez použití await
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Testovací SQL dotaz byl proveden.')),
                 );
               },
             ),

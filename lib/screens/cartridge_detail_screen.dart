@@ -5,13 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:shooting_companion/screens/barcode_scanner_screen.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert'; // Pro práci s JSON daty
-import 'package:shooting_companion/services/api_service.dart';
 import 'package:shooting_companion/services/weapon_service.dart';
-import 'package:shooting_companion/services/sync_service.dart';
-import 'dart:convert';
 
 Future<bool> isOnline() async {
   var connectivityResult = await (Connectivity().checkConnectivity());
@@ -21,33 +15,66 @@ Future<bool> isOnline() async {
 class SQLiteService {
   static Future<List<Map<String, dynamic>>> getWeaponsByCaliber(
       int caliberId) async {
-    final db = await openDatabase('app_database.db');
+    final db = await DatabaseHelper().database;
 
-    print('Debug: caliberId = $caliberId');
+    print('Debug: Připojeno k SQLite databázi');
 
-    final result = await db.query(
-      'weapons',
-      where: 'caliber_id = ?',
-      whereArgs: [caliberId],
-    );
-
-    if (result.isEmpty) {
-      print('Debug: Žádné zbraně nenalezeny pro caliberId=$caliberId');
-    } else {
-      print('Debug: Výsledek dotazu pro caliberId=$caliberId: $result');
+    // Kontrola platnosti caliberId
+    if (caliberId <= 0) {
+      print('Chyba: Neplatný caliberId: $caliberId');
+      return [];
     }
 
-    return result;
+    try {
+      print('Debug: Provádím dotaz pro caliberId=$caliberId');
+      final result = await db.rawQuery('''
+    SELECT 
+      weapons.id AS weapon_id,
+      weapons.name AS weapon_name,
+      calibers.id AS caliber_id,
+      calibers.name AS caliber_name
+    FROM weapons
+    JOIN weapon_calibers ON weapons.id = weapon_calibers.weapon_id
+    JOIN calibers ON weapon_calibers.caliber_id = calibers.id
+    WHERE calibers.id = ?
+  ''', [caliberId]);
+
+      print('Debug: Výsledky dotazu na zbraně: $result');
+
+      if (result.isEmpty) {
+        print('Debug: Výsledek dotazu je prázdný pro caliberId=$caliberId');
+
+        // Diagnostika tabulek
+        print('Debug: Kontroluji obsah relevantních tabulek...');
+        final weaponsTable = await db.rawQuery('SELECT * FROM weapons');
+        print('Debug: Obsah tabulky weapons: $weaponsTable');
+
+        final calibersTable = await db.rawQuery('SELECT * FROM calibers');
+        print('Debug: Obsah tabulky calibers: $calibersTable');
+
+        final weaponCalibersTable =
+            await db.rawQuery('SELECT * FROM weapon_calibers');
+        print('Debug: Obsah tabulky weapon_calibers: $weaponCalibersTable');
+
+        print('Debug: Ověř, zda data odpovídají caliberId=$caliberId');
+      }
+
+      return result;
+    } catch (e, stackTrace) {
+      print('Error: Chyba při provádění dotazu: $e');
+      print('Debug: StackTrace: $stackTrace');
+      return [];
+    }
   }
 
   static Future<List<Map<String, dynamic>>> getUserActivities() async {
-    final db = await openDatabase('app_database.db');
+    final db = await DatabaseHelper().database;
     return await db.query('activities');
   }
 
   // Přidání metody pro načtení cartridge podle ID
   static Future<Map<String, dynamic>?> getCartridgeById(int id) async {
-    final db = await openDatabase('app_database.db'); // Otevře SQLite databázi
+    final db = await DatabaseHelper().database; // Otevře SQLite databázi
     final result = await db.query(
       'cartridges', // Název tabulky
       where: 'id = ?', // Filtr na základě ID
@@ -55,8 +82,10 @@ class SQLiteService {
     );
 
     if (result.isNotEmpty) {
+      print('Debug: Cartridge nalezeno: ${result.first}');
       return result.first; // Vrátí první nalezený záznam
     } else {
+      print('Debug: Cartridge s ID $id nenalezeno.');
       return null; // Vrátí null, pokud žádný záznam neexistuje
     }
   }
@@ -94,53 +123,48 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
     });
 
     try {
-      print('Začátek načítání dat...');
       final cartridgeId = widget.cartridge['id'];
-      print('Načítám detaily náboje pro ID: $cartridgeId');
+      print('Začátek načítání dat...');
+      final caliberId = widget.cartridge['caliber_id'];
+      print(
+          'Debug: Načítám detaily náboje pro cartridge ID: $cartridgeId'); // Debugging s cartridge
 
-      // Načtení detailů náboje
-      final details = await ApiService.getCartridgeDetails(cartridgeId);
-
-      final caliberId = details['caliber_id'] ?? details['caliber']?['id'];
-
-      if (caliberId == null) {
-        print('Chyba: Nebylo možné získat caliber_id.');
-        print('Debug: Detaily kalibru: ${details['caliber']}');
-        setState(() {
-          isLoading = false;
-        });
-        return; // Ukončí funkci, pokud caliber_id není dostupné
-      }
-
-      if (details == null || details.isEmpty) {
-        print('Chyba: Žádné detaily náboje nebyly vráceny z API.');
-        setState(() {
-          isLoading = false;
-        });
-        return;
-      }
-
-      if (caliberId == null) {
-        print('Chyba: Nebylo možné získat caliber_id.');
-        print('Debug: Detaily kalibru: ${details['caliber']}');
-        setState(() {
-          isLoading = false;
-        });
-        return; // Ukončí funkci, pokud caliber_id není dostupné
-      }
-
-      // Debug výpis
-      print('Debug: caliberId = $caliberId');
-
-      // Online/offline rozhodnutí
+      // Kontrola online stavu
       bool online = await isOnline();
-      print('Online režim: $online');
+      print('Debug: Stav připojení - Online: $online');
 
       if (online) {
-        await _fetchOnlineData(caliberId, details);
-      } else {
-        await _fetchOfflineData(caliberId, details);
+        // Pokus o načítání dat z API podle caliber_id
+        try {
+          print(
+              'Debug: Volání ApiService.getCartridgeDetails pro cartridgeId: $cartridgeId');
+          final details = await ApiService.getCartridgeDetails(cartridgeId);
+
+          if (details != null && details.isNotEmpty) {
+            print('Debug: Detaily vrácené z API: $details');
+            // Pokud caliber_id není v details, použijeme caliber.id
+            final returnedCaliberId =
+                details['cartridgeId'] ?? details['caliber']?['id'];
+            if (returnedCaliberId == null) {
+              print('Chyba: caliberId je null.');
+              print('Debug: Kontrola details: $details');
+              return;
+            }
+            // Načítáme online data podle caliberId
+            await _fetchOnlineData(returnedCaliberId, details);
+            return; // Úspěšné načtení z API
+          } else {
+            print('Warning: API nevrátilo žádné detaily.');
+          }
+        } catch (apiError) {
+          print('Error: Chyba při volání API: $apiError');
+        }
       }
+
+      // Fallback na SQLite, pokud API nevrátí data
+      print('Debug: Přepínám na offline režim - načítám data z SQLite...');
+      await _fetchOfflineData(
+          caliberId, widget.cartridge); // Používáme caliberId pro offline režim
     } catch (e) {
       print('Chyba při načítání dat: $e');
     } finally {
@@ -168,8 +192,8 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
 
       setState(() {
         cartridgeDetails = details;
-        userWeapons = weaponsResponse ?? [];
-        userActivities = activitiesResponse ?? [];
+        userWeapons = weaponsResponse;
+        userActivities = activitiesResponse;
       });
     } catch (e) {
       print('Error: Chyba při načítání online dat: $e');
@@ -180,24 +204,70 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
   Future<void> _fetchOfflineData(
       int caliberId, Map<String, dynamic> details) async {
     try {
-      print('Debug: Načítám zbraně a aktivity offline...');
+      print('Debug: Začátek _fetchOfflineData');
 
-      // Volání metody getWeaponsByCaliber
+      // Pokud není caliberId znám, pokus se jej načíst
+      if (caliberId == 0 || caliberId == null) {
+        print(
+            'Debug: caliberId chybí, pokouším se načíst z details nebo SQLite.');
+
+        // Pokud details neobsahuje caliberId, načti cartridge z SQLite
+        if (details['caliber_id'] == null) {
+          print('Debug: caliber_id v details není dostupné.');
+
+          // Opraveno: Používáme správné caliber_id místo id
+          final localCartridge =
+              await SQLiteService.getCartridgeById(details['id']);
+
+          if (localCartridge != null) {
+            print('Debug: Načtený cartridge z SQLite: $localCartridge');
+            details = {...details, ...localCartridge};
+            caliberId = details['caliber_id']; // Použij správný caliber_id
+          } else {
+            print(
+                'Error: Cartridge s ID ${details['id']} nenalezen v SQLite. Ukončuji.');
+            return;
+          }
+        } else {
+          caliberId = details['caliber_id']; // Použij caliber_id z details
+          print('Debug: caliber_id získané z details: $caliberId');
+        }
+      }
+
+      // Kontrola, zda máme platný caliberId
+      if (caliberId == null) {
+        print(
+            'Error: caliberId stále není dostupné. Ukončuji _fetchOfflineData.');
+        return;
+      }
+
+      print('Debug: caliberId po načtení: $caliberId');
+
+      // Načtení zbraní pro tento caliberId
+      print(
+          'Debug: Spouštím SQLiteService.getWeaponsByCaliber pro caliberId=$caliberId');
       final localWeapons = await SQLiteService.getWeaponsByCaliber(caliberId);
-      print('Debug: Načtené zbraně (offline): $localWeapons');
+      print(
+          'Debug: Načtené zbraně: ${localWeapons.isNotEmpty ? localWeapons : 'Žádné zbraně nenalezeny'}');
 
-      // Volání metody getUserActivities
+      // Načtení uživatelských aktivit
+      print('Debug: Spouštím SQLiteService.getUserActivities');
       final localActivities = await SQLiteService.getUserActivities();
-      print('Debug: Načtené aktivity (offline): $localActivities');
+      print(
+          'Debug: Načtené aktivity: ${localActivities.isNotEmpty ? localActivities : 'Žádné aktivity nenalezeny'}');
 
       // Uložení dat do stavu
+      print('Debug: Ukládám data do stavu...');
       setState(() {
         cartridgeDetails = details;
         userWeapons = localWeapons;
         userActivities = localActivities;
       });
+      print('Debug: Data úspěšně uložena do stavu.');
     } catch (e) {
       print('Error: Chyba při načítání offline dat: $e');
+    } finally {
+      print('Debug: Konec _fetchOfflineData');
     }
   }
 
@@ -268,7 +338,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                         cartridge['barcode'] != null &&
                                 cartridge['barcode'].isNotEmpty
                             ? 'Přidělen'
-                            : 'Nepřidělen - klikněte pro přidělení',
+                            : 'Nepřidělen - přidělit?',
                         4,
                         icon: cartridge['barcode'] != null &&
                                 cartridge['barcode'].isNotEmpty
@@ -605,7 +675,6 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                       return;
                     }
 
-                    // Připrav data pro API nebo offline požadavek
                     final shootingLogData = {
                       'weapon_id': int.parse(selectedWeapon!),
                       'activity_type': 'Střelba',
@@ -613,7 +682,8 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                       'range': null,
                       'shots_fired':
                           int.tryParse(ammoCountController.text) ?? 0,
-                      'cartridge_id': widget.cartridge['id'],
+                      'caliber_id': widget.cartridge[
+                          'caliber_id'], // Použij caliber_id místo cartridge_id
                       'note': noteController.text,
                     };
 
@@ -650,6 +720,14 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                           );
                           print(
                               'Požadavek byl úspěšně uložen do offline_requests.');
+
+                          // Přidání Snackbaru pro uživatele
+                          scaffoldMessengerKey.currentState?.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Záznam byl uložen pro pozdější synchronizaci.'),
+                            ),
+                          );
                         } catch (error) {
                           print('Chyba při ukládání požadavku offline: $error');
                         }

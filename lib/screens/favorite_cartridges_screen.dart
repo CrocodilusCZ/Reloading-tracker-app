@@ -338,6 +338,19 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     }
   }
 
+  Future<void> _fetchUserWeapons(int caliberId) async {
+    try {
+      final weapons = await DatabaseHelper.getWeapons(caliberId: caliberId);
+      if (weapons.isNotEmpty) {
+        _showWeaponsDialog(weapons);
+      } else {
+        print("Pro tento kalibr nebyly nalezeny žádné zbraně.");
+      }
+    } catch (e) {
+      print('Chyba při načítání zbraní: $e');
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchCartridgesFromSQLite() async {
     final db = await DatabaseHelper().database;
 
@@ -401,6 +414,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
         // Přidání validního záznamu
         validatedCartridges.add({
           'id': cartridge['id'],
+          'caliber_id': cartridge['caliber_id'],
           'name': cartridge['name'] ?? 'Neznámý název',
           'stock_quantity': stock,
           'type': type,
@@ -413,7 +427,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
         });
         // Logování validace
         print(
-            "Validace náboje: ${cartridge['name']} | Typ: $type | Sklad: $stock | Kalibr: $caliberName");
+            "Validní: ID=${cartridge['id']}, Název=${cartridge['name']}, Kalibr ID=${cartridge['caliber_id']}, Kalibr=${cartridge['caliber_name']}");
       } catch (e) {
         // Logování chyby při zpracování
         print(
@@ -567,6 +581,38 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     );
 
     return [leftButton, rightButton];
+  }
+
+  void _showWeaponsDialog(List<Map<String, dynamic>> weapons) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text("Zbraně pro kalibr"),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              itemCount: weapons.length,
+              itemBuilder: (context, index) {
+                final weapon = weapons[index];
+                return ListTile(
+                  title: Text(weapon['name'] ?? 'Neznámá zbraň'),
+                  subtitle: Text('ID: ${weapon['id']}'),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text("Zavřít"),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _swapToggleButtons() {
@@ -737,8 +783,45 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) =>
-                      CartridgeDetailScreen(cartridge: cartridge),
+                  builder: (context) {
+                    // Přidání logů pro analýzu problému
+                    print("Debug: Kliknuto na náboj: $cartridge");
+
+                    // Zobrazení hodnot caliber_id a caliber před zpracováním
+                    print(
+                        "Debug: Hodnota 'caliber_id' před zpracováním: ${cartridge['caliber_id']}");
+                    print(
+                        "Debug: Hodnota 'caliber' před zpracováním: ${cartridge['caliber']}");
+
+                    // Ověření, že caliber_id je platné číslo
+                    final caliberId = cartridge['caliber_id'];
+                    if (caliberId is! int) {
+                      print(
+                          "Debug: Chyba - caliber_id není typu int. Hodnota: $caliberId");
+                    } else if (caliberId != 49) {
+                      print(
+                          "Debug: Caliber ID není správné. Očekáváme '49', ale máme: $caliberId");
+                    }
+
+                    // Získání správného cartridge ID (ID náboje)
+                    final cartridgeId =
+                        cartridge['id']; // Předání správného ID náboje
+
+                    // Předání správného cartridge_id a dalších dat do detailní obrazovky
+                    final cartridgeWithId = {
+                      ...cartridge,
+                      'cartridge_id': cartridgeId, // Předání cartridge_id
+                    };
+
+                    // Logování předávaných dat
+                    print(
+                        "Debug: Data předávaná do CartridgeDetailScreen: $cartridgeWithId");
+
+                    // Návrat na detailní obrazovku s předanými daty
+                    return CartridgeDetailScreen(
+                      cartridge: cartridgeWithId,
+                    );
+                  },
                 ),
               );
             },

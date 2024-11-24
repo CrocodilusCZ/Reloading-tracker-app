@@ -395,7 +395,9 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>> getCartridgeDetails(int id) async {
+  static Future<Map<String, dynamic>> getCartridgeDetails(
+      int cartridgeId) async {
+    // Změněno: parametru 'id' na 'cartridgeId'
     try {
       final online = await isOnline(); // Kontrola připojení k internetu
 
@@ -403,12 +405,15 @@ class ApiService {
       Map<String, dynamic>? cartridge;
       if (online) {
         // Online režim: Načti data z API
-        cartridge = await _get('cartridges/$id') as Map<String, dynamic>;
+        cartridge = await _get('cartridges/$cartridgeId')
+            as Map<String, dynamic>; // Změněno: z 'id' na 'cartridgeId'
         print('Načtená data z API: $cartridge');
       } else {
         // Offline režim: Načti data z SQLite
-        print('Načítám data z SQLite pro cartridge ID: $id');
-        cartridge = await DatabaseHelper().getDataById('cartridges', id)
+        print(
+            'Načítám data z SQLite pro cartridge ID: $cartridgeId'); // Změněno: z 'id' na 'cartridgeId'
+        cartridge = await DatabaseHelper().getDataById(
+                'cartridges', cartridgeId) // Změněno: z 'id' na 'cartridgeId'
             as Map<String, dynamic>?;
         if (cartridge == null) {
           throw Exception('Cartridge not found in offline database');
