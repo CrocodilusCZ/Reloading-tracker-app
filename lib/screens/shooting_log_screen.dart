@@ -664,7 +664,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Identifikace náboje'),
+        title: const Text('Přidat záznam do střeleckého deníku'),
       ),
       body: Column(
         children: <Widget>[
