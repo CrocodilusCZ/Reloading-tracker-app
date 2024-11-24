@@ -651,7 +651,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const BarcodeScannerScreen(),
+                        builder: (context) =>
+                            const BarcodeScannerScreen(source: 'dashboard'),
                       ),
                     );
                   },
@@ -730,7 +731,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const InventoryComponentsScreen(),
+                        builder: (context) => InventoryComponentsScreen(),
                       ),
                     );
                   },

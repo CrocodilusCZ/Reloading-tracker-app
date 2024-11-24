@@ -715,119 +715,188 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
           : widget.reloadCartridges,
     );
 
-    print("Filtrace výsledků: ${filteredCartridges.length} nábojů nalezeno.");
-
-    if (filteredCartridges.isEmpty) {
-      return const Center(
-        child: Text(
-          'Žádné náboje odpovídající filtru.',
-          style: TextStyle(fontSize: 18, color: Colors.grey),
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
-
     return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: filteredCartridges.length,
       itemBuilder: (context, index) {
         final cartridge = filteredCartridges[index];
         final name = cartridge['name'] ?? 'Neznámý náboj';
 
-        // Získání kalibru a skladové dostupnosti
-        final caliberName = cartridge.containsKey('caliber_name') &&
-                cartridge['caliber_name'] != null
-            ? cartridge['caliber_name']
-            : (cartridge.containsKey('caliber') &&
-                    cartridge['caliber'] != null &&
-                    cartridge['caliber']['name'] != null
-                ? cartridge['caliber']['name']
-                : 'Neznámý kalibr');
+        // Fix caliber name extraction
+        final caliberName = cartridge['caliber_name'] ??
+            (cartridge['caliber']?['name'] ?? 'Neznámý kalibr');
 
         final stock = cartridge['stock_quantity'] ?? 0;
+        final hasBarcode =
+            cartridge['barcode'] != null && cartridge['barcode'] != '';
 
-        // Získání informace o čárovém kódu
-        final hasBarcode = cartridge.containsKey('barcode') &&
-            (cartridge['barcode'] != null && cartridge['barcode'] != '');
+        print('Debug: Cartridge data: ${cartridge.toString()}'); // Debug print
+        print('Debug: Caliber name: $caliberName'); // Debug print
 
         return Card(
-          margin: const EdgeInsets.symmetric(vertical: 8),
-          elevation: 3,
-          child: ListTile(
-            title: Text(
-              name,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+          elevation: 2,
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: InkWell(
+            onTap: () => _navigateToDetail(cartridge),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2C3E50).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.adjust,
+                                    size: 14,
+                                    color: Color(0xFF2C3E50),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _truncateCaliberName(caliberName),
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Color(0xFF2C3E50),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: stock > 0
+                                    ? const Color(0xFF27AE60).withOpacity(0.1)
+                                    : Colors.red[100],
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.inventory_2,
+                                    size: 14,
+                                    color: stock > 0
+                                        ? const Color(0xFF27AE60)
+                                        : Colors.red,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '$stock ks',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: stock > 0
+                                          ? const Color(0xFF27AE60)
+                                          : Colors.red,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (hasBarcode)
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[200],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.qr_code,
+                        size: 16,
+                        color: Colors.black54,
+                      ),
+                    ),
+                ],
+              ),
             ),
-            subtitle: Row(
-              children: [
-                Icon(Icons.adjust, size: 16, color: Colors.blueGrey),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(caliberName,
-                      style: const TextStyle(fontSize: 14),
-                      overflow: TextOverflow.ellipsis),
-                ),
-                const SizedBox(width: 16),
-                const Icon(Icons.inventory_2, size: 16, color: Colors.grey),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text('$stock ks',
-                      style: const TextStyle(fontSize: 14),
-                      overflow: TextOverflow.ellipsis),
-                ),
-                const Spacer(),
-                if (hasBarcode)
-                  const Icon(Icons.qr_code, size: 20, color: Colors.blueGrey),
-              ],
-            ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) {
-                    // Přidání logů pro analýzu problému
-                    print("Debug: Kliknuto na náboj: $cartridge");
-
-                    // Zobrazení hodnot caliber_id a caliber před zpracováním
-                    print(
-                        "Debug: Hodnota 'caliber_id' před zpracováním: ${cartridge['caliber_id']}");
-                    print(
-                        "Debug: Hodnota 'caliber' před zpracováním: ${cartridge['caliber']}");
-
-                    // Ověření, že caliber_id je platné číslo
-                    final caliberId = cartridge['caliber_id'];
-                    if (caliberId is! int) {
-                      print(
-                          "Debug: Chyba - caliber_id není typu int. Hodnota: $caliberId");
-                    } else if (caliberId != 49) {
-                      print(
-                          "Debug: Caliber ID není správné. Očekáváme '49', ale máme: $caliberId");
-                    }
-
-                    // Získání správného cartridge ID (ID náboje)
-                    final cartridgeId =
-                        cartridge['id']; // Předání správného ID náboje
-
-                    // Předání správného cartridge_id a dalších dat do detailní obrazovky
-                    final cartridgeWithId = {
-                      ...cartridge,
-                      'cartridge_id': cartridgeId, // Předání cartridge_id
-                    };
-
-                    // Logování předávaných dat
-                    print(
-                        "Debug: Data předávaná do CartridgeDetailScreen: $cartridgeWithId");
-
-                    // Návrat na detailní obrazovku s předanými daty
-                    return CartridgeDetailScreen(
-                      cartridge: cartridgeWithId,
-                    );
-                  },
-                ),
-              );
-            },
           ),
         );
       },
     );
+  }
+
+  void _navigateToDetail(Map<String, dynamic> cartridge) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) {
+          // Přidání logů pro analýzu problému
+          print("Debug: Kliknuto na náboj: $cartridge");
+
+          // Zobrazení hodnot caliber_id a caliber před zpracováním
+          print(
+              "Debug: Hodnota 'caliber_id' před zpracováním: ${cartridge['caliber_id']}");
+          print(
+              "Debug: Hodnota 'caliber' před zpracováním: ${cartridge['caliber']}");
+
+          // Ověření, že caliber_id je platné číslo
+          final caliberId = cartridge['caliber_id'];
+          if (caliberId is! int) {
+            print(
+                "Debug: Chyba - caliber_id není typu int. Hodnota: $caliberId");
+          } else if (caliberId != 49) {
+            print(
+                "Debug: Caliber ID není správné. Očekáváme '49', ale máme: $caliberId");
+          }
+
+          // Získání správného cartridge ID (ID náboje)
+          final cartridgeId = cartridge['id']; // Předání správného ID náboje
+
+          // Předání správného cartridge_id a dalších dat do detailní obrazovky
+          final cartridgeWithId = {
+            ...cartridge,
+            'cartridge_id': cartridgeId, // Předání cartridge_id
+          };
+
+          // Logování předávaných dat
+          print(
+              "Debug: Data předávaná do CartridgeDetailScreen: $cartridgeWithId");
+
+          // Návrat na detailní obrazovku s předanými daty
+          return CartridgeDetailScreen(
+            cartridge: cartridgeWithId,
+          );
+        },
+      ),
+    );
+  }
+
+  String _truncateCaliberName(String name) {
+    return name.length > 15 ? '${name.substring(0, 15)}...' : name;
   }
 }

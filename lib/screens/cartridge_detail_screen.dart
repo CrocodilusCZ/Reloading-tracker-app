@@ -338,8 +338,12 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                                builder: (context) =>
-                                    const BarcodeScannerScreen()),
+                              builder: (context) => BarcodeScannerScreen(
+                                source: 'cartridge_detail',
+                                currentCartridge: widget
+                                    .cartridge, // Use widget.cartridge instead
+                              ),
+                            ),
                           );
                         }
                       },

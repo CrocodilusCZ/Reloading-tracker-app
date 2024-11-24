@@ -4,7 +4,14 @@ import 'package:shooting_companion/services/api_service.dart'; // Import API slu
 import 'package:vibration/vibration.dart';
 
 class BarcodeScannerScreen extends StatefulWidget {
-  const BarcodeScannerScreen({Key? key}) : super(key: key);
+  final String? source;
+  final Map<String, dynamic>? currentCartridge;
+
+  const BarcodeScannerScreen({
+    Key? key,
+    this.source,
+    this.currentCartridge,
+  }) : super(key: key);
 
   @override
   _BarcodeScannerScreenState createState() => _BarcodeScannerScreenState();
@@ -43,12 +50,12 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   }
 
   Future<void> _resetScanner() async {
-    setState(() {
-      scannedCode = null;
-      barcodeStatus = null;
-    });
     await controller?.resumeCamera();
-    isProcessing = false;
+    setState(() {
+      isProcessing = false;
+      barcodeStatus = null;
+      scannedCode = null;
+    });
   }
 
   Future<void> _checkBarcode(String scannedBarcode) async {
@@ -61,24 +68,43 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
             'Čárový kód je přiřazen k náboji ${response['cartridge']['name']}';
       });
 
-      String caliberName = response['cartridge']['caliber'] != null
-          ? response['cartridge']['caliber']['name']
-          : 'Neznámý kalibr';
-
-      int packageSize =
-          response['cartridge']['package_size'] ?? 0; // Získáme `package_size`
-
-      await _showIncreaseStockDialog(
+      if (widget.source == 'cartridge_detail') {
+        // Pokud jsme v detailu náboje, zobrazíme chybu
+        _showMessage('Tento čárový kód je již přiřazen k jinému náboji');
+        await _resetScanner();
+      } else {
+        // Z dashboardu nabídneme navýšení zásoby
+        String caliberName =
+            response['cartridge']['caliber']?['name'] ?? 'Neznámý kalibr';
+        int packageSize = response['cartridge']['package_size'] ?? 0;
+        await _showIncreaseStockDialog(
           scannedBarcode,
           response['cartridge']['name'],
           response['cartridge']['manufacturer'] ?? 'Neznámý výrobce',
           caliberName,
-          packageSize); // Předáme `packageSize` do dialogu
+          packageSize,
+        );
+      }
     } else {
       setState(() {
         barcodeStatus = 'Čárový kód není přiřazen.';
       });
-      await _showAssignBarcodeDialog(scannedBarcode); // Přímo zobrazíme dialog
+
+      if (widget.source == 'cartridge_detail') {
+        // Přímé přiřazení kódu k aktuálnímu náboji
+        try {
+          await ApiService.assignBarcode(
+              widget.currentCartridge!['id'], scannedBarcode);
+          _showMessage('Čárový kód byl úspěšně přiřazen');
+          Navigator.pop(context);
+        } catch (e) {
+          _showMessage('Chyba při přiřazování čárového kódu');
+          await _resetScanner();
+        }
+      } else {
+        // Standardní flow pro dashboard
+        await _showAssignBarcodeDialog(scannedBarcode);
+      }
     }
   }
 
