@@ -142,9 +142,8 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
 
           if (details != null && details.isNotEmpty) {
             print('Debug: Detaily vrácené z API: $details');
-            // Pokud caliber_id není v details, použijeme caliber.id
-            final returnedCaliberId =
-                details['cartridgeId'] ?? details['caliber']?['id'];
+// Použijeme přímo caliber_id z details
+            final returnedCaliberId = details['caliber_id'];
             if (returnedCaliberId == null) {
               print('Chyba: caliberId je null.');
               print('Debug: Kontrola details: $details');
@@ -179,20 +178,31 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
       int caliberId, Map<String, dynamic> details) async {
     try {
       print('Debug: Načítám zbraně a aktivity online...');
+
+      if (caliberId == 0 || caliberId == null) {
+        caliberId = details['caliber_id'];
+        print('Debug: Použitý caliber_id z details: $caliberId');
+      }
+
+      // Load weapons and transform data structure
       final weaponsResponse =
           await WeaponService.fetchWeaponsByCaliber(caliberId);
-      print('Debug: Načtené zbraně (online): $weaponsResponse');
+      print('Debug: Načtené zbraně před transformací: $weaponsResponse');
+
+      // Transform to match offline structure
+      final standardizedWeapons = weaponsResponse
+              ?.map((weapon) =>
+                  {'weapon_id': weapon['id'], 'weapon_name': weapon['name']})
+              .toList() ??
+          [];
+
+      print('Debug: Standardizované zbraně: $standardizedWeapons');
 
       final activitiesResponse = await ApiService.getUserActivities();
-      print('Debug: Načtené aktivity (online): $activitiesResponse');
-
-      if (weaponsResponse == null || weaponsResponse.isEmpty) {
-        print('Upozornění: Žádné zbraně nenalezeny pro caliberId=$caliberId');
-      }
 
       setState(() {
         cartridgeDetails = details;
-        userWeapons = weaponsResponse;
+        userWeapons = standardizedWeapons; // Use transformed data
         userActivities = activitiesResponse;
       });
     } catch (e) {
@@ -593,6 +603,8 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
   }
 
   Future<void> _showShootingLogForm(BuildContext context) async {
+    // Debug - zkontroluj obsah userWeapons
+    print('Načtené zbraně: $userWeapons');
     if (userWeapons.isEmpty) {
       scaffoldMessengerKey.currentState?.showSnackBar(
         const SnackBar(
@@ -625,9 +637,17 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                       value: selectedWeapon,
                       items:
                           userWeapons.map<DropdownMenuItem<String>>((weapon) {
+                        if (weapon != null &&
+                            weapon['weapon_id'] != null &&
+                            weapon['weapon_name'] != null) {
+                          return DropdownMenuItem<String>(
+                            value: weapon['weapon_id'].toString(),
+                            child: Text(weapon['weapon_name']),
+                          );
+                        }
                         return DropdownMenuItem<String>(
-                          value: weapon['id'].toString(),
-                          child: Text(weapon['name']),
+                          value: '',
+                          child: Text('Není k dispozici'),
                         );
                       }).toList(),
                       onChanged: (value) {
@@ -682,8 +702,8 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                       'range': null,
                       'shots_fired':
                           int.tryParse(ammoCountController.text) ?? 0,
-                      'caliber_id': widget.cartridge[
-                          'caliber_id'], // Použij caliber_id místo cartridge_id
+                      'cartridge_id': widget.cartridge[
+                          'id'], // Change from caliber_id to cartridge_id
                       'note': noteController.text,
                     };
 
