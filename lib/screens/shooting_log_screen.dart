@@ -133,6 +133,9 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
 
       if (userRanges.isEmpty) {
         print('Žádné střelnice nebyly nalezeny.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Žádné střelnice nebyly nalezeny')),
+        );
         return;
       }
 
@@ -146,12 +149,71 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       setState(() {
         selectedRange = nearestRange;
       });
+
+      if (mounted && nearestRange != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Icon(
+                    Icons.check_circle,
+                    color: Colors.green.shade700,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Střelnice byla automaticky vybrána na základě polohy',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Text(
+                        nearestRange,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF2C3E50),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            margin: const EdgeInsets.all(8),
+          ),
+        );
+      }
+
       print('Předvybraná střelnice: $selectedRange');
     } catch (e) {
       print('Chyba při načítání střelnic: $e');
       setState(() {
         isRangeInitialized = true;
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chyba při načítání střelnic')),
+        );
+      }
     }
   }
 

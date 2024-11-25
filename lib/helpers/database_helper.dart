@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'dart:convert'; // Pro práci s JSON¨
 import 'package:flutter/material.dart';
+import 'package:shooting_companion/database/database_schema.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -15,6 +16,10 @@ class DatabaseHelper {
   static Database? _database;
 
   DatabaseHelper._internal();
+
+  Future<void> createAllTables(Database db) async {
+    await DatabaseSchema.createTables(db); // Call private static method
+  }
 
   // Statická metoda pro získání zbraní
   static Future<List<Map<String, dynamic>>> getWeapons({int? caliberId}) async {
@@ -440,7 +445,7 @@ class DatabaseHelper {
         version: 12,
         onOpen: (db) async {
           print("Databáze byla úspěšně otevřena: $fullDbPath");
-          await _createAllTables(db);
+          await createAllTables(db);
           await _debugDatabase(db);
         },
       );
@@ -551,14 +556,34 @@ class DatabaseHelper {
           final type = cartridge['type'] ?? 'unknown';
           final cleanedCartridge = {
             'id': cartridge['id'],
+            'load_step_id': cartridge['load_step_id'],
             'user_id': cartridge['user_id'],
             'name': cartridge['name'],
-            'type': type,
+            'description': cartridge['description'],
+            'is_public': cartridge['is_public'],
+            'bullet_id': cartridge['bullet_id'],
+            'primer_id': cartridge['primer_id'],
+            'powder_weight': cartridge['powder_weight'],
             'stock_quantity': cartridge['stock_quantity'] ?? 0,
-            'caliber_id': cartridge['caliber_id'],
+            'brass_id': cartridge['brass_id'],
+            'velocity_ms': cartridge['velocity_ms'],
+            'oal': cartridge['oal'],
+            'standard_deviation': cartridge['standard_deviation'],
+            'is_favorite': cartridge['is_favorite'],
             'price': cartridge['price'] != null
                 ? double.tryParse(cartridge['price'].toString())
                 : 0.0,
+            'caliber_id': cartridge['caliber_id'],
+            'powder_id': cartridge['powder_id'],
+            'created_at': cartridge['created_at'],
+            'updated_at': cartridge['updated_at'],
+            'type': type,
+            'manufacturer': cartridge['manufacturer'],
+            'bullet_specification': cartridge['bullet_specification'],
+            'total_upvotes': cartridge['total_upvotes'],
+            'total_downvotes': cartridge['total_downvotes'],
+            'barcode': cartridge['barcode'],
+            'package_size': cartridge['package_size'],
           };
 
           await txn.insert('cartridges', cleanedCartridge,
@@ -614,7 +639,7 @@ class DatabaseHelper {
   Future<void> _onCreate(Database db, int version) async {
     print("Inicializuji databázi pro verzi $version...");
     try {
-      await _createAllTables(db);
+      await createAllTables(db);
       print("Tabulky byly úspěšně vytvořeny.");
     } catch (e) {
       print("Chyba při inicializaci databáze: $e");
@@ -661,7 +686,7 @@ class DatabaseHelper {
         // Pro verzi 9 provedeme změny schématu
         // Můžete buď přidat sloupec 'type', nebo smazat a znovu vytvořit tabulku
         await db.execute('DROP TABLE IF EXISTS cartridges');
-        await _createAllTables(db);
+        await createAllTables(db);
         print("Tabulka cartridges byla aktualizována.");
       }
       // Další migrace pro vyšší verze můžete přidat zde
@@ -669,135 +694,6 @@ class DatabaseHelper {
       print("Chyba při aktualizaci databáze: $e");
       rethrow;
     }
-  }
-
-  Future<void> _createAllTables(Database db) async {
-    print("Začínám vytvářet tabulky...");
-    try {
-      await db.execute('''CREATE TABLE IF NOT EXISTS user_profile (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        email TEXT,
-        last_sync DATETIME
-      )''');
-      print("Tabulka user_profile vytvořena.");
-
-      await db.execute('''CREATE TABLE IF NOT EXISTS components (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        type TEXT,
-        quantity INTEGER
-      )''');
-      print("Tabulka components vytvořena.");
-
-      await db.execute('''CREATE TABLE IF NOT EXISTS activities (
-        id INTEGER PRIMARY KEY,
-        user_id INTEGER,
-        activity_name TEXT NOT NULL,
-        note TEXT,
-        created_at DATETIME,
-        updated_at DATETIME,
-        is_global INTEGER,
-        date DATETIME
-      )''');
-      print("Tabulka activities vytvořena.");
-
-      await db.execute('''CREATE TABLE IF NOT EXISTS offline_requests (
-        id INTEGER PRIMARY KEY,
-        request_type TEXT,
-        data TEXT,
-        status TEXT
-      )''');
-      print("Tabulka offline_requests vytvořena.");
-
-      await db.execute('''CREATE TABLE IF NOT EXISTS ranges (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        location TEXT,
-        hourly_rate REAL,
-        user_id INTEGER,
-        created_at DATETIME,
-        updated_at DATETIME
-      )''');
-      print("Tabulka ranges vytvořena.");
-
-      await db.execute('''CREATE TABLE IF NOT EXISTS cartridges (
-        id INTEGER PRIMARY KEY,
-        load_step_id INTEGER NULL,
-        user_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        description TEXT NULL,
-        is_public INTEGER DEFAULT 0,
-        bullet_id INTEGER NULL,
-        primer_id INTEGER NULL,
-        powder_weight REAL NULL,
-        stock_quantity INTEGER DEFAULT 0,
-        brass_id INTEGER NULL,
-        velocity_ms REAL NULL,
-        oal REAL NULL,
-        standard_deviation REAL NULL,
-        is_favorite INTEGER DEFAULT 0,
-        price REAL NULL,
-        caliber_id INTEGER NULL,
-        powder_id INTEGER NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        type TEXT NULL,
-        manufacturer TEXT NULL,
-        bullet_specification TEXT NULL,
-        total_upvotes INTEGER DEFAULT 0,
-        total_downvotes INTEGER DEFAULT 0,
-        barcode TEXT NULL,
-        package_size INTEGER NULL
-      )''');
-      print("Tabulka cartridges vytvořena.");
-
-      await db.execute('''CREATE TABLE IF NOT EXISTS calibers (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT,
-        bullet_diameter TEXT,
-        case_length TEXT,
-        max_pressure TEXT,
-        user_id INTEGER,
-        is_global INTEGER DEFAULT 0,
-        created_at DATETIME,
-        updated_at DATETIME
-    )''');
-      print("Tabulka calibers vytvořena.");
-
-      await db.execute('''CREATE TABLE IF NOT EXISTS weapons (
-        id INTEGER PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        created_at DATETIME NOT NULL,
-        updated_at DATETIME NOT NULL,
-        initial_shots INTEGER DEFAULT 0
-      )''');
-      print("Tabulka weapons vytvořena.");
-
-      // Nová tabulka pro vztah mezi zbraněmi a kalibry
-      await db.execute('''CREATE TABLE IF NOT EXISTS weapon_calibers (
-        weapon_id INTEGER NOT NULL,
-        caliber_id INTEGER NOT NULL,
-        PRIMARY KEY (weapon_id, caliber_id),
-        FOREIGN KEY (weapon_id) REFERENCES weapons (id),
-        FOREIGN KEY (caliber_id) REFERENCES calibers (id)
-      )''');
-      print("Tabulka weapon_calibers vytvořena.");
-
-      await db.execute('''CREATE TABLE IF NOT EXISTS requests (
-        id INTEGER PRIMARY KEY,
-        request_type TEXT,
-        data TEXT,
-        status TEXT
-      )''');
-      print("Tabulka requests vytvořena.");
-    } catch (e) {
-      print("Chyba při vytváření tabulek: $e");
-      rethrow;
-    }
-    print("Všechny tabulky byly zkontrolovány/vytvořeny.");
   }
 
   Future<int> insertOrUpdate(String table, Map<String, dynamic> data) async {

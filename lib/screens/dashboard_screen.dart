@@ -385,13 +385,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final ranges = await ApiService.getUserRanges();
       setState(() {
-        isRangeInitialized = ranges.isNotEmpty;
+        // Stačí jen nastavit isRangeInitialized na true,
+        // detailní zpracování se děje v ShootingLogScreen
+        isRangeInitialized = true;
       });
-      if (!isRangeInitialized) {
-        SnackbarHelper.show(context, 'Nemáte žádné střelnice.');
-      }
     } catch (e) {
-      SnackbarHelper.show(context, 'Chyba při načítání střelnic.');
+      print('Error loading ranges: $e');
     }
   }
 
@@ -628,12 +627,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 CustomButton(
                   icon: Icons.book,
                   text: 'Střelecký deník',
-                  color: isRangeInitialized ? Colors.teal : Colors.grey,
+                  color: Colors
+                      .teal, // Always use teal since ranges are handled in ShootingLogScreen
                   onPressed: () {
-                    if (!isRangeInitialized) {
-                      SnackbarHelper.show(context,
-                          'Střelnice nebyly načteny. Pokračujete bez přiřazené střelnice.');
-                    }
                     Navigator.push(
                       context,
                       MaterialPageRoute(

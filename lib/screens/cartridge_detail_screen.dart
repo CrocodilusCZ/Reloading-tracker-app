@@ -423,7 +423,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                 onPressed:
                     isLoading ? null : () => _showShootingLogForm(context),
                 icon: const Icon(Icons.add),
-                label: const Text('Přidat záznam....:)'),
+                label: const Text('Přidat záznam'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blueGrey,
                   foregroundColor: Colors.white,
