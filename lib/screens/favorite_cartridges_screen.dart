@@ -456,11 +456,66 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     return validatedCartridges;
   }
 
+  Future<void> _saveFactoryCartridge(
+    String name,
+    String barcode,
+    String quantity,
+    String? caliberId,
+    String manufacturer, // Přidáno
+    String bulletSpecification, // Přidáno
+    String price, // Přidáno
+  ) async {
+    if (name.isEmpty || caliberId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vyplňte všechna povinná pole')),
+      );
+      return;
+    }
+
+    final factoryCartridgeData = {
+      'name': name,
+      'caliber_id': int.parse(caliberId),
+      'type': 'factory',
+      'stock_quantity': int.tryParse(quantity) ?? 0,
+      'barcode': barcode,
+      'manufacturer': manufacturer, // Přidáno
+      'bullet_specification': bulletSpecification, // Přidáno
+      'price': double.tryParse(price) ?? 0.0, // Přidáno
+    };
+
+    try {
+      if (await isOnline()) {
+        await ApiService.createFactoryCartridge(factoryCartridgeData);
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Náboj byl úspěšně přidán')),
+        );
+      } else {
+        await DatabaseHelper().addOfflineRequest(
+          context,
+          'create_factory_cartridge',
+          factoryCartridgeData,
+        );
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Náboj byl přidán do fronty pro synchronizaci')),
+        );
+      }
+      _refreshCartridges();
+    } catch (error) {
+      print('Chyba při přidávání továrního náboje: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chyba při přidávání náboje')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _refreshCartridges, // Přidání callbacku pro obnovu dat
+        onRefresh: _refreshCartridges,
         child: PageStorage(
           bucket: _bucket,
           child: _isLoading
@@ -475,6 +530,13 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
                 ),
         ),
       ),
+      floatingActionButton: _showFactoryCartridges // Podmíněné zobrazení tlačítka
+          ? FloatingActionButton(
+              onPressed: () => _showAddFactoryCartridgeDialog(),
+              child: const Icon(Icons.add),
+              tooltip: 'Přidat tovární náboj',
+            )
+          : null, // Když není aktivní záložka továrních nábojů, tlačítko se nezobrazí
     );
   }
 
@@ -595,6 +657,81 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     return [leftButton, rightButton];
   }
 
+  void _showAddFactoryCartridgeDialog() {
+    final nameController = TextEditingController();
+    final barcodeController = TextEditingController();
+    final quantityController = TextEditingController();
+    final manufacturerController = TextEditingController(); // Přidáno
+    final bulletSpecController = TextEditingController(); // Přidáno
+    final priceController = TextEditingController(); // Přidáno
+    String? selectedCaliberId;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Přidat tovární náboj'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration:
+                      const InputDecoration(labelText: 'Název náboje *'),
+                ),
+                TextField(
+                  controller: manufacturerController,
+                  decoration: const InputDecoration(labelText: 'Výrobce *'),
+                ),
+                TextField(
+                  controller: bulletSpecController,
+                  decoration:
+                      const InputDecoration(labelText: 'Specifikace střely *'),
+                ),
+                TextField(
+                  controller: priceController,
+                  decoration: const InputDecoration(labelText: 'Cena *'),
+                  keyboardType: TextInputType.number,
+                ),
+                TextField(
+                  controller: barcodeController,
+                  decoration: const InputDecoration(labelText: 'Čárový kód'),
+                ),
+                TextField(
+                  controller: quantityController,
+                  decoration: const InputDecoration(labelText: 'Počet kusů'),
+                  keyboardType: TextInputType.number,
+                ),
+                _buildCaliberSelector((String id) {
+                  selectedCaliberId = id;
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Zrušit'),
+            ),
+            ElevatedButton(
+              onPressed: () => _saveFactoryCartridge(
+                nameController.text,
+                barcodeController.text,
+                quantityController.text,
+                selectedCaliberId,
+                manufacturerController.text, // Přidáno
+                bulletSpecController.text, // Přidáno
+                priceController.text, // Přidáno
+              ),
+              child: const Text('Přidat'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _showWeaponsDialog(List<Map<String, dynamic>> weapons) {
     showDialog(
       context: context,
@@ -655,6 +792,28 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
         ),
       );
     });
+  }
+
+  Widget _buildCaliberSelector(Function(String) onCaliberSelected) {
+    return FutureBuilder<List<dynamic>>(
+      future: ApiService.getCalibers(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const CircularProgressIndicator();
+        }
+
+        return DropdownButtonFormField<String>(
+          decoration: const InputDecoration(labelText: 'Kalibr'),
+          items: snapshot.data!.map((caliber) {
+            return DropdownMenuItem<String>(
+              value: caliber['id'].toString(),
+              child: Text(caliber['name']),
+            );
+          }).toList(),
+          onChanged: (value) => onCaliberSelected(value!),
+        );
+      },
+    );
   }
 
   Widget _buildZeroStockSwitch() {

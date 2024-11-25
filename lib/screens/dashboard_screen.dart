@@ -25,11 +25,13 @@ import 'package:shooting_companion/helpers/snackbar_helper.dart';
 import 'package:shooting_companion/helpers/connectivity_helper.dart';
 import 'package:shooting_companion/services/sync_service.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:http/http.dart' as http;
 
 class DashboardScreen extends StatefulWidget {
   final String username;
 
   const DashboardScreen({super.key, required this.username});
+  static const String currentVersion = "1.0.0"; // Aktuální verze aplikace
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
@@ -48,6 +50,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _checkVersion();
     username = widget.username;
 
     // Inicializace SyncService
@@ -136,6 +139,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'reload': <Map<String, dynamic>>[],
       };
     });
+  }
+
+  Future<void> _checkVersion() async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://www.reloading-tracker.cz/actual_version.txt'),
+      );
+
+      if (response.statusCode == 200) {
+        final latestVersion = response.body.trim();
+
+        if (latestVersion != DashboardScreen.currentVersion) {
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (BuildContext context) {
+                return AlertDialog(
+                  title: const Text('Dostupná nová verze'),
+                  content:
+                      Text('Vaše verze: ${DashboardScreen.currentVersion}\n'
+                          'Dostupná verze: $latestVersion'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                );
+              },
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print('Chyba při kontrole verze: $e');
+    }
   }
 
   void testSQLQuery() async {
