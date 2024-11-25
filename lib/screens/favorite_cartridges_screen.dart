@@ -37,7 +37,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   @override
   void initState() {
     super.initState();
-
+    _loadZeroStockPreference();
     // Inicializace původních dat z widgetu
     originalFactoryCartridges = List.from(widget.factoryCartridges);
     originalReloadCartridges = List.from(widget.reloadCartridges);
@@ -62,6 +62,18 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _refreshCartridges();
     });
+  }
+
+  Future<void> _loadZeroStockPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _showZeroStock = prefs.getBool('favorite_show_zero_stock') ?? false;
+    });
+  }
+
+  Future<void> _saveZeroStockPreference(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('favorite_show_zero_stock', value);
   }
 
   Future<void> _initializeCartridges() async {
@@ -661,13 +673,14 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
             Switch(
               value: _showZeroStock,
               activeColor: Colors.blueGrey,
-              onChanged: (value) {
+              onChanged: (value) async {
                 setState(() {
                   _showZeroStock = value;
-                  _updateCartridges(_showFactoryCartridges
-                      ? originalFactoryCartridges
-                      : originalReloadCartridges);
                 });
+                await _saveZeroStockPreference(value);
+                _updateCartridges(_showFactoryCartridges
+                    ? originalFactoryCartridges
+                    : originalReloadCartridges);
               },
             ),
           ],

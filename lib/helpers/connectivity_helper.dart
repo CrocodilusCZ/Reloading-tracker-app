@@ -4,18 +4,26 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
 Future<bool> isOnline() async {
-  var connectivityResult = await Connectivity().checkConnectivity();
-  if (connectivityResult == ConnectivityResult.none) {
-    return false;
-  }
-
   try {
-    final result = await InternetAddress.lookup('8.8.8.8');
-    if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
-      return true;
+    // Nejprve zkontrolujeme základní připojení
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      return false;
+    }
+
+    // Pak zkusíme skutečné připojení k internetu
+    try {
+      final result = await InternetAddress.lookup('google.com');
+      if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
+        return true;
+      }
+    } catch (e) {
+      print('Chyba při kontrole připojení k internetu: $e');
+      return false;
     }
   } catch (e) {
-    print('Chyba při ověřování připojení k internetu: $e');
+    print('Chyba při kontrole konektivity: $e');
+    return false;
   }
   return false;
 }
