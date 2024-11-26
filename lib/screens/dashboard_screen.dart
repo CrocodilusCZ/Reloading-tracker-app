@@ -31,7 +31,7 @@ class DashboardScreen extends StatefulWidget {
   final String username;
 
   const DashboardScreen({super.key, required this.username});
-  static const String currentVersion = "1.0.1"; // Aktuální verze aplikace
+  static const String currentVersion = "1.0.2"; // Aktuální verze aplikace
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();

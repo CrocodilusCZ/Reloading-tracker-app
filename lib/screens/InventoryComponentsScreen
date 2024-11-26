@@ -1,0 +1,47 @@
+import 'package:flutter/material.dart';
+
+class InventoryComponentsScreen extends StatelessWidget {
+  const InventoryComponentsScreen({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    // Zde můžete načíst komponenty ze služby nebo API
+    final List<Map<String, dynamic>> components = [
+      {
+        'name': 'Střela',
+        'stock_quantity': 500,
+      },
+      {
+        'name': 'Prach',
+        'stock_quantity': 200,
+      },
+      {
+        'name': 'Zápalka',
+        'stock_quantity': 1000,
+      },
+    ];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Přehled Skladových Zásob Komponent'),
+        backgroundColor: Colors.blueGrey,
+      ),
+      body: ListView.builder(
+        itemCount: components.length,
+        itemBuilder: (context, index) {
+          final component = components[index];
+          return Card(
+            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+            child: ListTile(
+              title: Text(
+                component['name'],
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text('Sklad: ${component['stock_quantity']} ks'),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}

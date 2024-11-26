@@ -62,18 +62,34 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     final response = await ApiService.checkBarcode(scannedBarcode);
     print('Odpověď API (kontrola čárového kódu): $response');
 
-    if (response['exists'] == true) {
-      setState(() {
-        barcodeStatus =
-            'Čárový kód je přiřazen k náboji ${response['cartridge']['name']}';
-      });
+    final bool isCartridgeDetailScreen = widget.source == 'cartridge_detail';
+    final bool barcodeExists = response['exists'] == true;
 
-      if (widget.source == 'cartridge_detail') {
-        // Pokud jsme v detailu náboje, zobrazíme chybu
+    setState(() {
+      barcodeStatus = barcodeExists
+          ? 'Čárový kód je přiřazen k náboji ${response['cartridge']['name']}'
+          : 'Čárový kód není přiřazen.';
+    });
+
+    if (isCartridgeDetailScreen) {
+      // Logic for CartridgeDetailScreen
+      if (barcodeExists) {
         _showMessage('Tento čárový kód je již přiřazen k jinému náboji');
         await _resetScanner();
       } else {
-        // Z dashboardu nabídneme navýšení zásoby
+        try {
+          await ApiService.assignBarcode(
+              widget.currentCartridge!['id'], scannedBarcode);
+          _showMessage('Čárový kód byl úspěšně přiřazen');
+          Navigator.pop(context);
+        } catch (e) {
+          _showMessage('Chyba při přiřazování čárového kódu');
+          await _resetScanner();
+        }
+      }
+    } else {
+      // Logic for main barcode scanner screen
+      if (barcodeExists) {
         String caliberName =
             response['cartridge']['caliber']?['name'] ?? 'Neznámý kalibr';
         int packageSize = response['cartridge']['package_size'] ?? 0;
@@ -84,25 +100,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
           caliberName,
           packageSize,
         );
-      }
-    } else {
-      setState(() {
-        barcodeStatus = 'Čárový kód není přiřazen.';
-      });
-
-      if (widget.source == 'cartridge_detail') {
-        // Přímé přiřazení kódu k aktuálnímu náboji
-        try {
-          await ApiService.assignBarcode(
-              widget.currentCartridge!['id'], scannedBarcode);
-          _showMessage('Čárový kód byl úspěšně přiřazen');
-          Navigator.pop(context);
-        } catch (e) {
-          _showMessage('Chyba při přiřazování čárového kódu');
-          await _resetScanner();
-        }
       } else {
-        // Standardní flow pro dashboard
         await _showAssignBarcodeDialog(scannedBarcode);
       }
     }
@@ -165,159 +163,298 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   }
 
   Future<void> _showAssignBarcodeDialog(String scannedBarcode) async {
-    final cartridgesResponse = await ApiService.getFactoryCartridges();
-    print('Odpověď API (seznam továrních nábojů): $cartridgesResponse');
+    try {
+      final cartridgesResponse = await ApiService.getFactoryCartridges();
+      print('Odpověď API (seznam továrních nábojů): $cartridgesResponse');
 
-    if (cartridgesResponse.isEmpty) {
-      _showMessage('Nemáte žádné tovární náboje k přiřazení.');
-      await _resetScanner();
-      return;
-    }
+      if (cartridgesResponse.isEmpty) {
+        _showMessage('Nemáte žádné tovární náboje k přiřazení.');
+        await _resetScanner();
+        return;
+      }
 
-    await showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: const Text('Přiřadit čárový kód nebo vytvořit nový náboj'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                const Text('Vyberte náboj pro přiřazení čárového kódu:'),
-                const SizedBox(height: 10),
-                ...cartridgesResponse.map<Widget>((cartridge) {
-                  bool hasBarcode = cartridge['barcode'] != null &&
-                      cartridge['barcode'] != '';
-                  return Container(
-                    margin: const EdgeInsets.symmetric(vertical: 5),
-                    child: ElevatedButton(
-                      onPressed: hasBarcode
-                          ? null
-                          : () async {
-                              await ApiService.assignBarcode(
-                                  cartridge['id'], scannedBarcode);
-                              Navigator.pop(dialogContext);
-                              _showMessage(
-                                  'Čárový kód byl přiřazen k náboji: ${cartridge['name']}\n'
-                                  'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}\n'
-                                  'Kalibr: ${cartridge['caliber']['name']}\n'
-                                  'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}\n'
-                                  'Cena za kus: ${cartridge['price']} Kč\n'
-                                  'Skladová zásoba: ${cartridge['stock_quantity']} ks');
-                              await _resetScanner();
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: hasBarcode
-                            ? Colors.grey
-                            : Theme.of(context).primaryColor,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4.0),
-                          side:
-                              const BorderSide(color: Colors.black, width: 2.0),
+      // Sort cartridges - unassigned first
+      final sortedCartridges = [...cartridgesResponse]..sort((a, b) {
+          bool aHasBarcode = a['barcode'] != null && a['barcode'] != '';
+          bool bHasBarcode = b['barcode'] != null && b['barcode'] != '';
+          return aHasBarcode ? 1 : -1;
+        });
+
+      await showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            title: const Text('Přiřadit čárový kód'),
+            content: Container(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    // Create New Button at top
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.add_circle_outline,
+                            color: Colors.white),
+                        label: const Text(
+                          'Vytvořit nový náboj',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
                         ),
-                        minimumSize: const Size(double.infinity, 60),
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 16.0, horizontal: 12.0),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            cartridge['name'],
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: hasBarcode ? Colors.black54 : Colors.white,
-                            ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          const SizedBox(height: 5),
-                          Text(
-                            'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}',
-                            style: TextStyle(
-                              color:
-                                  hasBarcode ? Colors.black54 : Colors.white70,
-                            ),
-                          ),
-                          Text(
-                            'Kalibr: ${cartridge['caliber']['name']}',
-                            style: TextStyle(
-                              color:
-                                  hasBarcode ? Colors.black54 : Colors.white70,
-                            ),
-                          ),
-                          Text(
-                            'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}',
-                            style: TextStyle(
-                              color:
-                                  hasBarcode ? Colors.black54 : Colors.white70,
-                            ),
-                          ),
-                          Text(
-                            'Cena za kus: ${cartridge['price']} Kč',
-                            style: TextStyle(
-                              color:
-                                  hasBarcode ? Colors.black54 : Colors.white70,
-                            ),
-                          ),
-                          Text(
-                            'Skladová zásoba: ${cartridge['stock_quantity']} ks',
-                            style: TextStyle(
-                              color:
-                                  hasBarcode ? Colors.black54 : Colors.white70,
-                            ),
-                          ),
-                          if (hasBarcode)
-                            const Text(
-                              'Čárový kód již přiřazen',
-                              style: TextStyle(
-                                color: Colors.redAccent,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                        ],
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(dialogContext);
+                          await _showCreateNewCartridgeForm(scannedBarcode);
+                        },
                       ),
                     ),
-                  );
-                }).toList(),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: () async {
-                    Navigator.pop(dialogContext);
-                    await _showCreateNewCartridgeForm(scannedBarcode);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).primaryColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4.0),
-                      side: const BorderSide(color: Colors.black, width: 2.0),
+
+                    const Divider(height: 24),
+
+                    // Available cartridges section
+                    const Text(
+                      'Dostupné náboje k přiřazení:',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
                     ),
-                    minimumSize: const Size(double.infinity, 60),
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 16.0, horizontal: 12.0),
-                  ),
-                  child: const Text(
-                    'Vytvořit nový náboj',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
+                    const SizedBox(height: 12),
+
+                    ...sortedCartridges.map<Widget>((cartridge) {
+                      bool hasBarcode = cartridge['barcode'] != null &&
+                          cartridge['barcode'] != '';
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        elevation: hasBarcode ? 0 : 2,
+                        color: hasBarcode ? Colors.grey.shade100 : Colors.white,
+                        child: InkWell(
+                          onTap: hasBarcode
+                              ? null
+                              : () async {
+                                  try {
+                                    await ApiService.assignBarcode(
+                                        cartridge['id'], scannedBarcode);
+                                    Navigator.pop(dialogContext);
+                                    _showMessage(
+                                        'Čárový kód byl úspěšně přiřazen k náboji ${cartridge['name']}');
+                                  } catch (e) {
+                                    _showMessage(
+                                        'Chyba při přiřazování čárového kódu: ${e.toString()}');
+                                  }
+                                  await _resetScanner();
+                                },
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        cartridge['name'],
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: hasBarcode
+                                              ? Colors.grey
+                                              : Colors.black87,
+                                        ),
+                                      ),
+                                    ),
+                                    if (hasBarcode)
+                                      const Icon(Icons.qr_code,
+                                          color: Colors.grey)
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '${cartridge['manufacturer'] ?? "Neznámý"} • ${cartridge['caliber']['name']}',
+                                  style: TextStyle(
+                                    color: hasBarcode
+                                        ? Colors.grey
+                                        : Colors.black54,
+                                  ),
+                                ),
+                                Text(
+                                  '${cartridge['price']} Kč • Zásoba: ${cartridge['stock_quantity']} ks',
+                                  style: TextStyle(
+                                    color: hasBarcode
+                                        ? Colors.grey
+                                        : Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ],
                 ),
-              ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(dialogContext);
+                  await _resetScanner();
+                },
+                child: const Text('Zrušit'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      _showMessage('Chyba při načítání továrních nábojů: ${e.toString()}');
+      await _resetScanner();
+    }
+  }
+
+  Widget _buildCartridgeButton({
+    required Map<String, dynamic> cartridge,
+    required bool hasBarcode,
+    required BuildContext dialogContext,
+    required String scannedBarcode,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 5),
+      child: ElevatedButton(
+        onPressed: hasBarcode
+            ? null
+            : () async {
+                try {
+                  await ApiService.assignBarcode(
+                      cartridge['id'], scannedBarcode);
+                  Navigator.pop(dialogContext);
+                  _showMessage(
+                      'Čárový kód byl přiřazen k náboji: ${cartridge['name']}\n'
+                      'Výrobce: ${cartridge['manufacturer'] ?? "Neznámý"}\n'
+                      'Kalibr: ${cartridge['caliber']['name']}\n'
+                      'Specifikace střely: ${cartridge['bullet_specification'] ?? "Neznámá"}\n'
+                      'Cena za kus: ${cartridge['price']} Kč\n'
+                      'Skladová zásoba: ${cartridge['stock_quantity']} ks');
+                } catch (e) {
+                  _showMessage(
+                      'Chyba při přiřazování čárového kódu: ${e.toString()}');
+                } finally {
+                  await _resetScanner();
+                }
+              },
+        style: ElevatedButton.styleFrom(
+          backgroundColor:
+              hasBarcode ? Colors.grey : Theme.of(dialogContext).primaryColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(4.0),
+            side: const BorderSide(color: Colors.black, width: 2.0),
+          ),
+          minimumSize: const Size(double.infinity, 60),
+          padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
+        ),
+        child: _buildCartridgeButtonContent(cartridge, hasBarcode),
+      ),
+    );
+  }
+
+  Widget _buildCartridgeButtonContent(
+      Map<String, dynamic> cartridge, bool hasBarcode) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          cartridge['name'],
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: hasBarcode ? Colors.black54 : Colors.white,
+          ),
+        ),
+        const SizedBox(height: 5),
+        ...[
+          'Výrobce',
+          'Kalibr',
+          'Specifikace střely',
+          'Cena za kus',
+          'Skladová zásoba'
+        ].map((label) => _buildInfoRow(label, cartridge, hasBarcode)).toList(),
+        if (hasBarcode)
+          const Text(
+            'Čárový kód již přiřazen',
+            style: TextStyle(
+              color: Colors.redAccent,
+              fontWeight: FontWeight.bold,
             ),
           ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(dialogContext);
-                await _resetScanner();
-              },
-              child: const Text('Zrušit'),
-            ),
-          ],
-        );
+      ],
+    );
+  }
+
+  Widget _buildInfoRow(
+      String label, Map<String, dynamic> cartridge, bool hasBarcode) {
+    String value = '';
+    switch (label) {
+      case 'Výrobce':
+        value = '${cartridge['manufacturer'] ?? "Neznámý"}';
+        break;
+      case 'Kalibr':
+        value = cartridge['caliber']['name'];
+        break;
+      case 'Specifikace střely':
+        value = '${cartridge['bullet_specification'] ?? "Neznámá"}';
+        break;
+      case 'Cena za kus':
+        value = '${cartridge['price']} Kč';
+        break;
+      case 'Skladová zásoba':
+        value = '${cartridge['stock_quantity']} ks';
+        break;
+    }
+
+    return Text(
+      '$label: $value',
+      style: TextStyle(
+        color: hasBarcode ? Colors.black54 : Colors.white70,
+      ),
+    );
+  }
+
+  Widget _buildCreateNewButton(
+      BuildContext dialogContext, String scannedBarcode) {
+    return ElevatedButton(
+      onPressed: () async {
+        Navigator.pop(dialogContext);
+        await _showCreateNewCartridgeForm(scannedBarcode);
       },
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Theme.of(dialogContext).primaryColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4.0),
+          side: const BorderSide(color: Colors.black, width: 2.0),
+        ),
+        minimumSize: const Size(double.infinity, 60),
+        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
+      ),
+      child: const Text(
+        'Vytvořit nový náboj',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
     );
   }
 

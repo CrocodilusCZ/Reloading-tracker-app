@@ -24,7 +24,8 @@ class FavoriteCartridgesScreen extends StatefulWidget {
       _FavoriteCartridgesScreenState();
 }
 
-class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
+class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
+    with SingleTickerProviderStateMixin {
   final PageStorageBucket _bucket = PageStorageBucket();
 
   bool _showFactoryCartridges = true;
@@ -32,36 +33,68 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
   String? selectedCaliber;
   List<String> calibers = [];
   bool _isLoading = false;
-  bool _factoryLeft = true; // Pořadí tlačítek
+  bool _factoryLeft = true;
+  late TabController _tabController;
+  late List<Map<String, dynamic>> originalFactoryCartridges;
+  late List<Map<String, dynamic>> originalReloadCartridges;
 
   @override
   void initState() {
     super.initState();
+    print("=== Initializing Favorite Cartridges Screen ===");
+
+    // Initialize data
+    originalFactoryCartridges =
+        List<Map<String, dynamic>>.from(widget.factoryCartridges);
+    originalReloadCartridges =
+        List<Map<String, dynamic>>.from(widget.reloadCartridges);
+    print("Factory cartridges count: ${originalFactoryCartridges.length}");
+    print("Reload cartridges count: ${originalReloadCartridges.length}");
+
+    // Load preferences first to get button positions
+    _loadPreferences(); // Sets _factoryLeft
     _loadZeroStockPreference();
-    // Inicializace původních dat z widgetu
-    originalFactoryCartridges = List.from(widget.factoryCartridges);
-    originalReloadCartridges = List.from(widget.reloadCartridges);
 
-    // Načtení kalibrů
-    calibers = _getUniqueCalibers(
-        [...originalFactoryCartridges, ...originalReloadCartridges]);
-    calibers.insert(0, "Vše"); // Přidání možnosti "Vše" na začátek seznamu
-    selectedCaliber = "Vše"; // Nastavení výchozího kalibru
-
-    // Načtení uživatelských preferencí
-    _loadPreferences();
-
-    // Nastavení výchozí záložky na základě preferencí
+    // Sync cartridge visibility with button position
     _showFactoryCartridges = _factoryLeft;
 
-    // Přidání logování inicializačních dat
-    print("Inicializační tovární náboje: $originalFactoryCartridges");
-    print("Inicializační přebíjené náboje: $originalReloadCartridges");
+    // Setup calibers
+    calibers = _getUniqueCalibers(
+        [...originalFactoryCartridges, ...originalReloadCartridges]);
+    calibers.insert(0, "Vše");
+    selectedCaliber = "Vše";
 
-    // Načtení a aktualizace dat z API nebo SQLite
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _refreshCartridges();
+    // Setup TabController with correct initial position
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: _factoryLeft == _showFactoryCartridges ? 0 : 1,
+    );
+
+    // Updated tab change listener considering button positions
+    _tabController.addListener(() {
+      setState(() {
+        // Update visibility based on tab position and button layout
+        _showFactoryCartridges = _factoryLeft
+            ? _tabController.index == 0
+            : _tabController.index == 1;
+
+        _updateCartridges(List<Map<String, dynamic>>.from(_showFactoryCartridges
+            ? originalFactoryCartridges
+            : originalReloadCartridges));
+      });
     });
+
+    // Initial data load
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshCartridges();
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadZeroStockPreference() async {
@@ -136,9 +169,10 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     print("Před filtrem: ${cartridges.length} nábojů");
     print("_showFactoryCartridges: $_showFactoryCartridges");
 
-    final sourceCartridges = _showFactoryCartridges
-        ? originalFactoryCartridges
-        : originalReloadCartridges;
+    final sourceCartridges = List<Map<String, dynamic>>.from(
+        _showFactoryCartridges
+            ? originalFactoryCartridges
+            : originalReloadCartridges);
 
     final filteredCartridges = _filterByCaliber(sourceCartridges);
 
@@ -320,9 +354,9 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
             .toList();
 
         // Aktualizace viditelných nábojů
-        _updateCartridges(_showFactoryCartridges
+        _updateCartridges(List<Map<String, dynamic>>.from(_showFactoryCartridges
             ? originalFactoryCartridges
-            : originalReloadCartridges);
+            : originalReloadCartridges));
 
         // Aktualizace seznamu kalibrů
         _updateCalibers();
@@ -512,18 +546,28 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
                     _buildToggleButtons(),
                     _buildZeroStockSwitch(),
                     _buildCaliberDropdown(),
-                    Expanded(child: _buildCartridgeList()),
+                    Expanded(
+                      child: TabBarView(
+                        controller: _tabController,
+                        children: [
+                          // Tovární náboje
+                          _buildCartridgeList(),
+                          // Přebíjené náboje
+                          _buildCartridgeList(),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
         ),
       ),
-      floatingActionButton: _showFactoryCartridges // Podmíněné zobrazení tlačítka
+      floatingActionButton: _showFactoryCartridges
           ? FloatingActionButton(
               onPressed: () => _showAddFactoryCartridgeDialog(),
               child: const Icon(Icons.add),
               tooltip: 'Přidat tovární náboj',
             )
-          : null, // Když není aktivní záložka továrních nábojů, tlačítko se nezobrazí
+          : null,
     );
   }
 
@@ -537,48 +581,63 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Tlačítka
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
                   child: GestureDetector(
-                    onLongPress: _swapToggleButtons, // Funkce přehodí tlačítka
-                    child: _buildStyledButton(
-                      icon: _factoryLeft
-                          ? Icons.factory_outlined
-                          : Icons.build_circle_outlined,
-                      label: _factoryLeft ? 'Tovární' : 'Přebíjené',
-                      isActive: _factoryLeft == _showFactoryCartridges,
-                      onPressed: () {
-                        setState(() {
-                          _showFactoryCartridges = _factoryLeft;
-                          _updateCartridges(_showFactoryCartridges
-                              ? originalFactoryCartridges
-                              : originalReloadCartridges);
-                        });
-                      },
+                    onLongPress: _swapToggleButtons,
+                    child: AnimatedContainer(
+                      // Added animation
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      child: _buildStyledButton(
+                        icon: _factoryLeft
+                            ? Icons.factory_outlined
+                            : Icons.build_circle_outlined,
+                        label: _factoryLeft ? 'Tovární' : 'Přebíjené',
+                        isActive: _factoryLeft == _showFactoryCartridges,
+                        onPressed: () {
+                          setState(() {
+                            _showFactoryCartridges = _factoryLeft;
+                            _tabController.animateTo(_factoryLeft
+                                ? 0
+                                : 1); // Sync with TabController
+                            _updateCartridges(_showFactoryCartridges
+                                ? originalFactoryCartridges
+                                : originalReloadCartridges);
+                          });
+                        },
+                      ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 16), // Mezera mezi tlačítky
+                const SizedBox(width: 16),
                 Expanded(
                   child: GestureDetector(
-                    onLongPress: _swapToggleButtons, // Funkce přehodí tlačítka
-                    child: _buildStyledButton(
-                      icon: _factoryLeft
-                          ? Icons.build_circle_outlined
-                          : Icons.factory_outlined,
-                      label: _factoryLeft ? 'Přebíjené' : 'Tovární',
-                      isActive: _factoryLeft != _showFactoryCartridges,
-                      onPressed: () {
-                        setState(() {
-                          _showFactoryCartridges = !_factoryLeft;
-                          _updateCartridges(_showFactoryCartridges
-                              ? originalFactoryCartridges
-                              : originalReloadCartridges);
-                        });
-                      },
+                    onLongPress: _swapToggleButtons,
+                    child: AnimatedContainer(
+                      // Added animation
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      child: _buildStyledButton(
+                        icon: _factoryLeft
+                            ? Icons.build_circle_outlined
+                            : Icons.factory_outlined,
+                        label: _factoryLeft ? 'Přebíjené' : 'Tovární',
+                        isActive: _factoryLeft != _showFactoryCartridges,
+                        onPressed: () {
+                          setState(() {
+                            _showFactoryCartridges = !_factoryLeft;
+                            _tabController.animateTo(!_factoryLeft
+                                ? 0
+                                : 1); // Sync with TabController
+                            _updateCartridges(_showFactoryCartridges
+                                ? originalFactoryCartridges
+                                : originalReloadCartridges);
+                          });
+                        },
+                      ),
                     ),
                   ),
                 ),
