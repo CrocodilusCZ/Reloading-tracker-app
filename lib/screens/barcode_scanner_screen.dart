@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:shooting_companion/services/api_service.dart'; // Import API služby
 import 'package:vibration/vibration.dart';
+import 'package:shooting_companion/widgets/factory_cartridge_form.dart';
 
 class BarcodeScannerScreen extends StatefulWidget {
   final String? source;
@@ -487,177 +488,47 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   }
 
   Future<void> _showCreateNewCartridgeForm(String scannedBarcode) async {
-    final TextEditingController nameController = TextEditingController();
-    final TextEditingController manufacturerController =
-        TextEditingController();
-    final TextEditingController bulletSpecController = TextEditingController();
-    final TextEditingController priceController = TextEditingController();
-    final TextEditingController stockController = TextEditingController();
-    final TextEditingController packageSizeController = TextEditingController();
-    bool isFavorite = false;
-    int? selectedCaliberId;
-
-    // Načtení seznamu kalibrů
-    final calibers =
-        await ApiService.getCalibers(); // Předpoklad metody na načtení kalibrů
+    final formKey = GlobalKey<FactoryCartridgeFormState>();
 
     await showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
-            return AlertDialog(
-              title: const Text('Vytvořit nový náboj'),
-              content: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration:
-                          const InputDecoration(labelText: 'Název náboje'),
-                    ),
-                    TextField(
-                      controller: manufacturerController,
-                      decoration: const InputDecoration(labelText: 'Výrobce'),
-                    ),
-                    TextField(
-                      controller: bulletSpecController,
-                      decoration: const InputDecoration(
-                          labelText: 'Specifikace střely'),
-                    ),
-                    TextField(
-                      controller: priceController,
-                      keyboardType: TextInputType.number,
-                      decoration:
-                          const InputDecoration(labelText: 'Cena za kus'),
-                    ),
-                    TextField(
-                      controller: stockController,
-                      keyboardType: TextInputType.number,
-                      decoration:
-                          const InputDecoration(labelText: 'Skladová zásoba'),
-                    ),
-                    TextField(
-                      controller:
-                          packageSizeController, // Přidáno pro prodejní balení
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                          labelText: 'Velikost prodejního balení'),
-                    ),
-                    TextFormField(
-                      controller: TextEditingController(
-                          text: selectedCaliberId != null
-                              ? calibers.firstWhere((caliber) =>
-                                  caliber['id'] == selectedCaliberId)['name']
-                              : "Vyberte kalibr"),
-                      readOnly: true,
-                      decoration: const InputDecoration(labelText: 'Kalibr'),
-                      onTap: () async {
-                        // Otevřít dialog s výběrem kalibrů
-                        await showDialog(
-                          context: context,
-                          builder: (BuildContext dialogContext) {
-                            return AlertDialog(
-                              title: const Text('Vyberte kalibr'),
-                              content: SizedBox(
-                                width: double.maxFinite,
-                                child: Scrollbar(
-                                  thumbVisibility: true,
-                                  child: ListView.builder(
-                                    shrinkWrap: true,
-                                    itemCount: calibers.length,
-                                    itemBuilder: (context, index) {
-                                      final caliber = calibers[index];
-                                      return ListTile(
-                                        title: Text(caliber['name']),
-                                        onTap: () {
-                                          setState(() {
-                                            selectedCaliberId = caliber['id'];
-                                          });
-                                          Navigator.pop(dialogContext);
-                                        },
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                              actions: <Widget>[
-                                TextButton(
-                                  onPressed: () {
-                                    Navigator.pop(dialogContext);
-                                  },
-                                  child: const Text('Zrušit'),
-                                ),
-                              ],
-                            );
-                          },
-                        );
-                      },
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Oblíbený'),
-                        Switch(
-                          value: isFavorite,
-                          onChanged: (value) {
-                            setState(() {
-                              isFavorite = value;
-                            });
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () async {
+        return AlertDialog(
+          title: const Text('Vytvořit nový náboj'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: FactoryCartridgeForm(
+              key: formKey,
+              scannedBarcode: scannedBarcode,
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _resetScanner();
+              },
+              child: const Text('Zrušit'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final formData = formKey.currentState?.getFormData();
+                if (formData != null) {
+                  try {
+                    final response =
+                        await ApiService.createFactoryCartridge(formData);
                     Navigator.pop(dialogContext);
-                    if (selectedCaliberId == null) {
-                      _showMessage('Vyberte prosím kalibr.');
-                      return;
-                    }
-
-                    final cartridgeData = {
-                      'name': nameController.text,
-                      'manufacturer': manufacturerController.text,
-                      'bullet_specification': bulletSpecController.text,
-                      'caliber_id':
-                          selectedCaliberId, // Dynamicky vybraný kalibr
-                      'price': double.tryParse(priceController.text) ?? 0.0,
-                      'stock_quantity': int.tryParse(stockController.text) ?? 0,
-                      'package_size':
-                          int.tryParse(packageSizeController.text) ?? 1,
-                      'barcode': scannedBarcode,
-                      'is_favorite': isFavorite,
-                    };
-
-                    try {
-                      final response = await ApiService.createFactoryCartridge(
-                          cartridgeData);
-                      _showMessage(
-                          'Nový náboj byl vytvořen: ${response['name']}');
-                    } catch (e) {
-                      _showMessage('Chyba při vytváření náboje: $e');
-                    }
-
-                    await _resetScanner();
-                  },
-                  child: const Text('Vytvořit'),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    Navigator.pop(dialogContext);
-                    await _resetScanner();
-                  },
-                  child: const Text('Zrušit'),
-                ),
-              ],
-            );
-          },
+                    _showMessage(
+                        'Nový náboj byl vytvořen: ${response['name']}');
+                  } catch (e) {
+                    _showMessage('Chyba při vytváření náboje: $e');
+                  }
+                  await _resetScanner();
+                }
+              },
+              child: const Text('Vytvořit'),
+            ),
+          ],
         );
       },
     );

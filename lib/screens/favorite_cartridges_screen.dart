@@ -37,6 +37,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
   late TabController _tabController;
   late List<Map<String, dynamic>> originalFactoryCartridges;
   late List<Map<String, dynamic>> originalReloadCartridges;
+  bool _isManualToggle = false;
 
   @override
   void initState() {
@@ -51,8 +52,8 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
     print("Factory cartridges count: ${originalFactoryCartridges.length}");
     print("Reload cartridges count: ${originalReloadCartridges.length}");
 
-    // Load preferences first to get button positions
-    _loadPreferences(); // Sets _factoryLeft
+    // Load preferences first
+    _loadPreferences();
     _loadZeroStockPreference();
 
     // Sync cartridge visibility with button position
@@ -64,26 +65,15 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
     calibers.insert(0, "Vše");
     selectedCaliber = "Vše";
 
-    // Setup TabController with correct initial position
+    // Setup TabController
     _tabController = TabController(
       length: 2,
       vsync: this,
-      initialIndex: _factoryLeft == _showFactoryCartridges ? 0 : 1,
+      initialIndex: _factoryLeft ? 0 : 1,
     );
 
-    // Updated tab change listener considering button positions
-    _tabController.addListener(() {
-      setState(() {
-        // Update visibility based on tab position and button layout
-        _showFactoryCartridges = _factoryLeft
-            ? _tabController.index == 0
-            : _tabController.index == 1;
-
-        _updateCartridges(List<Map<String, dynamic>>.from(_showFactoryCartridges
-            ? originalFactoryCartridges
-            : originalReloadCartridges));
-      });
-    });
+    // Add tab change listener
+    _tabController.addListener(_handleTabChange);
 
     // Initial data load
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -91,10 +81,82 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
     });
   }
 
+  void _handleTabChange() {
+    if (!mounted) return;
+
+    setState(() {
+      _showFactoryCartridges = _tabController.index == 0;
+      _updateCartridges(_showFactoryCartridges
+          ? originalFactoryCartridges
+          : originalReloadCartridges);
+    });
+  }
+
   @override
   void dispose() {
+    _tabController.removeListener(_handleTabChange);
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _swapToggleButtons() {
+    _isManualToggle = true;
+    setState(() {
+      _factoryLeft = !_factoryLeft;
+      _showFactoryCartridges = !_showFactoryCartridges;
+
+      // Update content and tab position
+      _updateCartridges(_showFactoryCartridges
+          ? originalFactoryCartridges
+          : originalReloadCartridges);
+      _tabController.animateTo(_factoryLeft
+          ? (_showFactoryCartridges ? 0 : 1)
+          : (_showFactoryCartridges ? 1 : 0));
+
+      _savePreferences();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _factoryLeft
+                ? 'Tlačítka přehodnocena: Tovární vlevo, Přebíjené vpravo'
+                : 'Tlačítka přehodnocena: Přebíjené vlevo, Tovární vpravo',
+          ),
+          duration: const Duration(milliseconds: 800),
+        ),
+      );
+    });
+    _isManualToggle = false;
+  }
+
+  void _handleTogglePressed(bool isFactorySelected) {
+    print(
+        "DEBUG: Toggle pressed - isFactorySelected: $isFactorySelected, _factoryLeft: $_factoryLeft, current tab: ${_tabController.index}");
+
+    _isManualToggle = true;
+    setState(() {
+      // First update content visibility
+      _showFactoryCartridges = isFactorySelected;
+
+      // Calculate and verify target index
+      final targetIndex = _factoryLeft
+          ? (isFactorySelected ? 0 : 1)
+          : (isFactorySelected ? 1 : 0);
+      print("DEBUG: Calculated target index: $targetIndex");
+
+      // Update content before tab animation
+      _updateCartridges(_showFactoryCartridges
+          ? originalFactoryCartridges
+          : originalReloadCartridges);
+
+      // Force tab position update
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _tabController.animateTo(targetIndex, duration: Duration.zero);
+        }
+      });
+    });
+    _isManualToggle = false;
   }
 
   Future<void> _loadZeroStockPreference() async {
@@ -808,36 +870,6 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
         );
       },
     );
-  }
-
-  void _swapToggleButtons() {
-    setState(() {
-      // Přehodí pořadí tlačítek
-      _factoryLeft = !_factoryLeft;
-
-      // Zachování aktuálního výběru při prohození
-      _showFactoryCartridges = !_showFactoryCartridges;
-
-      // Aktualizace obsahu
-      _updateCartridges(_showFactoryCartridges
-          ? originalFactoryCartridges
-          : originalReloadCartridges);
-
-      // Uložení preference po změně
-      _savePreferences();
-
-      // Zpětná vazba pro uživatele
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _factoryLeft
-                ? 'Tlačítka přehodnocena: Tovární vlevo, Přebíjené vpravo'
-                : 'Tlačítka přehodnocena: Přebíjené vlevo, Tovární vpravo',
-          ),
-          duration: const Duration(milliseconds: 800),
-        ),
-      );
-    });
   }
 
   Widget _buildCaliberSelector(Function(String) onCaliberSelected) {
