@@ -9,6 +9,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'dart:convert'; // Pro práci s JSON¨
 import 'package:flutter/material.dart';
 import 'package:shooting_companion/database/database_schema.dart';
+import 'package:shooting_companion/models/cartridge.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -547,52 +548,63 @@ class DatabaseHelper {
         print('Vymazávám tabulku cartridges před synchronizací.');
         await txn.delete('cartridges');
 
-        for (var cartridge in cartridges) {
-          if (cartridge['id'] == null || cartridge['name'] == null) {
-            print("Neplatný náboj: $cartridge - přeskočeno.");
+        for (var cartridgeData in cartridges) {
+          if (cartridgeData['id'] == null || cartridgeData['name'] == null) {
+            print("Neplatný náboj: $cartridgeData - přeskočeno.");
             continue;
           }
 
-          final type = cartridge['type'] ?? 'unknown';
-          final cleanedCartridge = {
-            'id': cartridge['id'],
-            'load_step_id': cartridge['load_step_id'],
-            'user_id': cartridge['user_id'],
-            'name': cartridge['name'],
-            'description': cartridge['description'],
-            'is_public': cartridge['is_public'],
-            'bullet_id': cartridge['bullet_id'],
-            'primer_id': cartridge['primer_id'],
-            'powder_weight': cartridge['powder_weight'],
-            'stock_quantity': cartridge['stock_quantity'] ?? 0,
-            'brass_id': cartridge['brass_id'],
-            'velocity_ms': cartridge['velocity_ms'],
-            'oal': cartridge['oal'],
-            'standard_deviation': cartridge['standard_deviation'],
-            'is_favorite': cartridge['is_favorite'],
-            'price': cartridge['price'] != null
-                ? double.tryParse(cartridge['price'].toString())
-                : 0.0,
-            'caliber_id': cartridge['caliber_id'],
-            'powder_id': cartridge['powder_id'],
-            'created_at': cartridge['created_at'],
-            'updated_at': cartridge['updated_at'],
-            'type': type,
-            'manufacturer': cartridge['manufacturer'],
-            'bullet_specification': cartridge['bullet_specification'],
-            'total_upvotes': cartridge['total_upvotes'],
-            'total_downvotes': cartridge['total_downvotes'],
-            'barcode': cartridge['barcode'],
-            'package_size': cartridge['package_size'],
+          final caliberId =
+              cartridgeData['caliber']?['id'] ?? cartridgeData['caliber_id'];
+          final caliberName = cartridgeData['caliber']?['name'] ??
+              cartridgeData['caliber_name'];
+
+          // Extrakce dat o komponentách
+          final bulletName =
+              cartridgeData['bullet']?['name'] ?? cartridgeData['bullet_name'];
+          final powderName =
+              cartridgeData['powder']?['name'] ?? cartridgeData['powder_name'];
+          final primerName =
+              cartridgeData['primer']?['name'] ?? cartridgeData['primer_name'];
+
+          final cartridgeMap = {
+            'id': cartridgeData['id'],
+            'name': cartridgeData['name'],
+            'cartridge_type': cartridgeData['type'] ?? 'unknown',
+            'caliber_id': caliberId,
+            'caliber_name': caliberName,
+            'stock_quantity': cartridgeData['stock_quantity'] ?? 0,
+            'price': cartridgeData['price']?.toString() ?? '0',
+            'manufacturer': cartridgeData['manufacturer'],
+            'bullet_specification': cartridgeData['bullet_specification'],
+            'bullet_name': bulletName, // Přidáno
+            'bullet_weight_grains':
+                cartridgeData['bullet']?['weight_grains']?.toString(),
+            'powder_name': powderName, // Přidáno
+            'powder_weight': cartridgeData['powder_weight']?.toString(),
+            'primer_name': primerName, // Přidáno
+            'velocity_ms': cartridgeData['velocity_ms']?.toString(),
+            'standard_deviation':
+                cartridgeData['standard_deviation']?.toString(),
+            'oal': cartridgeData['oal']?.toString(),
+            'barcode': cartridgeData['barcode'],
+            'is_favorite': cartridgeData['is_favorite'] == true ? 1 : 0,
+            'created_at': cartridgeData['created_at'],
+            'updated_at': cartridgeData['updated_at'],
           };
 
-          await txn.insert('cartridges', cleanedCartridge,
-              conflictAlgorithm: ConflictAlgorithm.replace);
+          await txn.insert(
+            'cartridges',
+            cartridgeMap,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
         }
       });
+
       print("Synchronizace nábojů dokončena. Počet: ${cartridges.length}");
     } catch (e) {
       print("Chyba při synchronizaci nábojů: $e");
+      throw e;
     }
   }
 
@@ -747,58 +759,51 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> fetchCartridgesFromSQLite() async {
     final db = await database;
 
-    // Zjednodušený a přehlednější SQL dotaz
     final cartridges = await db.rawQuery('''
-    SELECT 
-      c.*,  -- Všechny sloupce z cartridges
-      cal.name AS caliber_name,
-      cal.id AS caliber_id
-    FROM cartridges c
-    LEFT JOIN calibers cal ON c.caliber_id = cal.id
+    SELECT * FROM cartridges
   ''');
 
     List<Map<String, dynamic>> validatedCartridges = [];
-
     for (var cartridge in cartridges) {
       try {
-        // Kontrola a logování pokud caliber_id je null
-        if (cartridge['caliber_id'] == null) {
-          print("Warning: Náboj ID ${cartridge['id']} má caliber_id = null");
+        final Map<String, dynamic> mutableCartridge =
+            Map<String, dynamic>.from(cartridge);
 
-          // Možnost přiřadit výchozí hodnotu nebo pokračovat
-          cartridge['caliber_id'] =
-              -1; // Představuje neznámý kalibr, pokud je to potřeba
-        }
+        // Zachování typu náboje z databáze
+        final cartridgeType = mutableCartridge['cartridge_type'];
+        print(
+            'Debug: Načítám náboj ${mutableCartridge['name']}, typ v DB: $cartridgeType');
 
-        // Přidání validovaného náboje do seznamu
         validatedCartridges.add({
-          'id': cartridge['id'],
-          'name': cartridge['name'] ??
-              'Neznámý název', // Použije náhradní název, pokud není k dispozici
-          'stock_quantity': _parseIntSafely(cartridge['stock_quantity']),
-          'type': cartridge['type'] ??
-              cartridge['cartridge_type'] ??
-              'Neznámý typ', // Použije náhradní typ
+          'id': mutableCartridge['id'],
+          'name': mutableCartridge['name'] ?? 'Neznámý název',
           'cartridge_type':
-              cartridge['type'] ?? cartridge['cartridge_type'] ?? 'Neznámý typ',
-          'caliber_name': cartridge['caliber_name'] ??
-              'Neznámý kalibr', // Použije náhradní název kalibru
-          'caliber_id': cartridge[
-              'caliber_id'], // Použije caliber_id (i když je třeba výchozí hodnota)
-          'description':
-              cartridge['description'] ?? '', // Náhradní hodnota pro popis
-          'price': _parseDoubleSafely(cartridge['price']),
-          'barcode':
-              cartridge['barcode'] ?? '', // Pokud není, použije prázdný řetězec
-          'manufacturer': cartridge['manufacturer'] ??
-              'Neznámý výrobce', // Pokud není, použije náhradní hodnotu
-          'created_at': cartridge['created_at'],
-          'updated_at': cartridge['updated_at'],
-          'is_favorite': cartridge['is_favorite'] == 1,
-          'is_public': cartridge['is_public'] == 1,
+              cartridgeType, // Upraveno z 'type' na 'cartridge_type'
+          'caliber_name': mutableCartridge['caliber_name'] ?? 'Neznámý kalibr',
+          'stock_quantity': int.tryParse(
+                  mutableCartridge['stock_quantity']?.toString() ?? '0') ??
+              0,
+          'price':
+              double.tryParse(mutableCartridge['price']?.toString() ?? '0') ??
+                  0.0,
+
+          // Tovární náboje
+          'manufacturer': mutableCartridge['manufacturer'],
+          'bullet_specification': mutableCartridge['bullet_specification'],
+
+          // Přebíjené náboje
+          'bullet_name': mutableCartridge['bullet_name'],
+          'powder_name': mutableCartridge['powder_name'],
+          'powder_weight': mutableCartridge['powder_weight'],
+          'primer_name': mutableCartridge['primer_name'],
+          'oal': mutableCartridge['oal'],
+          'velocity_ms': mutableCartridge['velocity_ms'],
+
+          'barcode': mutableCartridge['barcode'],
+          'is_favorite': mutableCartridge['is_favorite'] == 1,
         });
       } catch (e) {
-        print("Chyba při zpracování náboje ID ${cartridge['id']}: $e");
+        print('Chyba při zpracování náboje ID ${cartridge['id']}: $e');
       }
     }
 
@@ -844,21 +849,14 @@ class DatabaseHelper {
   Future<Map<String, List<Map<String, dynamic>>>> _fetchCartridges() async {
     try {
       // Fetch data from SQLite or any other source
-      final cartridgesFromSQLite =
-          await DatabaseHelper().fetchCartridgesFromSQLite();
+      final cartridges = await DatabaseHelper().fetchCartridgesFromSQLite();
 
-      // Aktualizace atributu z 'type' na 'cartridge_type' pro lepší konzistenci v kódu
-      final cleanedCartridges = cartridgesFromSQLite.map((cartridge) {
-        if (cartridge.containsKey('type')) {
-          cartridge['cartridge_type'] = cartridge['type'] ?? 'unknown';
-        }
-        return cartridge;
-      }).toList();
+      // Pokud potřebujete další úpravy nebo čištění dat, můžete je provést zde
 
-      final factory = cleanedCartridges
+      final factory = cartridges
           .where((cartridge) => cartridge['cartridge_type'] == 'factory')
           .toList();
-      final reload = cleanedCartridges
+      final reload = cartridges
           .where((cartridge) => cartridge['cartridge_type'] == 'reload')
           .toList();
 
@@ -935,7 +933,8 @@ class DatabaseHelper {
     // Například:
     if (columnName == 'name' ||
         columnName == 'description' ||
-        columnName == 'type' ||
+        columnName ==
+            'cartridge_type' || // Změněno z 'type' na 'cartridge_type'
         columnName == 'manufacturer' ||
         columnName == 'bullet_specification' ||
         columnName == 'barcode') {

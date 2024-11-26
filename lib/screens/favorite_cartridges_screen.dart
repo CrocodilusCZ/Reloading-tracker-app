@@ -371,33 +371,20 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen> {
     final cartridges = await db.rawQuery('''
   SELECT
     cartridges.id,
-    cartridges.load_step_id,
-    cartridges.user_id,
     cartridges.name,
-    cartridges.description,
-    cartridges.is_public,
-    cartridges.bullet_id,
-    cartridges.primer_id,
     cartridges.powder_weight,
     cartridges.stock_quantity,
-    cartridges.brass_id,
     cartridges.velocity_ms,
-    cartridges.oal,
-    cartridges.standard_deviation,
-    cartridges.is_favorite,
+    cartridges.oal,    
     cartridges.price,
     cartridges.caliber_id,
-    cartridges.powder_id,
     cartridges.created_at,
     cartridges.updated_at,
-    cartridges.type AS cartridge_type,
     cartridges.manufacturer,
     cartridges.bullet_specification,
-    cartridges.total_upvotes,
-    cartridges.total_downvotes,
     cartridges.barcode,
-    cartridges.package_size,
-    calibers.name AS caliber_name
+    calibers.name AS caliber_name,
+    cartridges.cartridge_type
   FROM cartridges
   LEFT JOIN calibers ON cartridges.caliber_id = calibers.id
   ''');
