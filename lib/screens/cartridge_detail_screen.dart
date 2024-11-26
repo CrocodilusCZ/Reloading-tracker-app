@@ -313,169 +313,184 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
     final isReloaded = cartridge['type'] == 'reload'; // Kontrola typu náboje
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(cartridge['name'] ?? 'Detail Náboje'),
-        backgroundColor: Colors.blueGrey,
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _fetchData, // Zavolá _fetchData při tažení dolů
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Název náboje
-                    Text(
-                      cartridge['name'] ?? 'Neznámý náboj',
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+        appBar: AppBar(
+          title: Text(cartridge['name'] ?? 'Detail Náboje'),
+          backgroundColor: Colors.blueGrey,
+        ),
+        body: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _fetchData, // Zavolá _fetchData při tažení dolů
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Název náboje
+                      Text(
+                        cartridge['name'] ?? 'Neznámý náboj',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Sekce: Kalibr a výrobce
-                    _buildSectionTitle('Kalibr a Výrobce'),
-                    _buildStripedInfoRow('Kalibr',
-                        cartridge['caliber']?['name'] ?? 'Neznámý', 0),
-                    if (cartridge['type'] == 'factory') // Přidaná podmínka
-                      _buildStripedInfoRow(
-                          'Výrobce', cartridge['manufacturer'] ?? 'Neznámý', 1),
-
-                    const SizedBox(height: 16),
-
-                    // Sekce: Cena a dostupnost
-                    _buildSectionTitle('Cena a Dostupnost'),
-                    _buildStripedInfoRow(
-                        'Cena', '${cartridge['price'] ?? 'Neznámá'} Kč', 2),
-                    _buildStripedInfoRow('Sklad',
-                        '${cartridge['stock_quantity'] ?? 'Neznámý'} ks', 3),
-
-                    // Sekce: Barcode
-                    _buildSectionTitle('Čárový kód'),
-                    GestureDetector(
-                      onTap: () {
-                        if (cartridge['barcode'] == null ||
-                            cartridge['barcode'].isEmpty) {
-                          // Spuštění obrazovky pro skenování čárového kódu
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => BarcodeScannerScreen(
-                                source: 'cartridge_detail',
-                                currentCartridge: widget
-                                    .cartridge, // Use widget.cartridge instead
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                      child: _buildStripedInfoRow(
-                        'Čárový kód',
-                        cartridge['barcode'] != null &&
-                                cartridge['barcode'].isNotEmpty
-                            ? 'Přidělen'
-                            : 'Nepřidělen - přidělit?',
-                        4,
-                        icon: cartridge['barcode'] != null &&
-                                cartridge['barcode'].isNotEmpty
-                            ? const Icon(Icons.check, color: Colors.green)
-                            : const Icon(Icons.qr_code, color: Colors.blue),
-                      ),
-                    ),
-
-                    if (isReloaded) ...[
                       const SizedBox(height: 16),
 
-                      // Sekce: Technické informace (pouze pro přebíjené náboje)
-                      _buildSectionTitle('Technické Informace'),
+                      // Sekce: Kalibr a výrobce
+                      _buildSectionTitle('Kalibr a Výrobce'),
+                      _buildStripedInfoRow('Kalibr',
+                          cartridge['caliber']?['name'] ?? 'Neznámý', 0),
+                      if (cartridge['type'] == 'factory') // Přidaná podmínka
+                        _buildStripedInfoRow('Výrobce',
+                            cartridge['manufacturer'] ?? 'Neznámý', 1),
+
+                      const SizedBox(height: 16),
+
+                      // Sekce: Cena a dostupnost
+                      _buildSectionTitle('Cena a Dostupnost'),
                       _buildStripedInfoRow(
-                        'Střela',
-                        cartridge['bullet'] != null
-                            ? '${cartridge['bullet']['name']} (${cartridge['bullet']['weight_grains']} gr)'
-                            : 'Neznámá',
-                        5,
+                          'Cena', '${cartridge['price'] ?? 'Neznámá'} Kč', 2),
+                      _buildStripedInfoRow('Sklad',
+                          '${cartridge['stock_quantity'] ?? 'Neznámý'} ks', 3),
+
+                      // Sekce: Barcode
+                      _buildSectionTitle('Čárový kód'),
+                      GestureDetector(
+                        onTap: () {
+                          if (cartridge['barcode'] == null ||
+                              cartridge['barcode'].isEmpty) {
+                            // Spuštění obrazovky pro skenování čárového kódu
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => BarcodeScannerScreen(
+                                  source: 'cartridge_detail',
+                                  currentCartridge: widget
+                                      .cartridge, // Use widget.cartridge instead
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        child: _buildStripedInfoRow(
+                          'Čárový kód',
+                          cartridge['barcode'] != null &&
+                                  cartridge['barcode'].isNotEmpty
+                              ? 'Přidělen'
+                              : 'Nepřidělen - přidělit?',
+                          4,
+                          icon: cartridge['barcode'] != null &&
+                                  cartridge['barcode'].isNotEmpty
+                              ? const Icon(Icons.check, color: Colors.green)
+                              : const Icon(Icons.qr_code, color: Colors.blue),
+                        ),
                       ),
-                      _buildStripedInfoRow(
-                        'Prach',
-                        cartridge['powder'] != null
-                            ? cartridge['powder']['name']
-                            : 'Neznámý',
-                        6,
-                      ),
-                      _buildStripedInfoRow(
-                        'Navážka prachu',
-                        cartridge['powder_weight'] != null
-                            ? '${cartridge['powder_weight']} gr'
-                            : 'Neznámá',
-                        7,
-                      ),
-                      _buildStripedInfoRow(
-                        'OAL',
-                        cartridge['oal'] != null
-                            ? '${cartridge['oal']} mm'
-                            : 'Neznámá',
-                        8,
-                      ),
-                      _buildStripedInfoRow(
-                        'Rychlost',
-                        cartridge['velocity_ms'] != null
-                            ? '${cartridge['velocity_ms']} m/s'
-                            : 'Neznámá',
-                        9,
-                      ),
-                      _buildStripedInfoRow(
-                        'Standardní Deviace',
-                        cartridge['standard_deviation'] != null
-                            ? '${cartridge['standard_deviation']}'
-                            : 'Neznámá',
-                        10,
-                      ),
+
+                      if (isReloaded) ...[
+                        const SizedBox(height: 16),
+
+                        // Sekce: Technické informace (pouze pro přebíjené náboje)
+                        _buildSectionTitle('Technické Informace'),
+                        _buildStripedInfoRow(
+                          'Střela',
+                          cartridge['bullet'] != null
+                              ? '${cartridge['bullet']['name']} (${cartridge['bullet']['weight_grains']} gr)'
+                              : 'Neznámá',
+                          5,
+                        ),
+                        _buildStripedInfoRow(
+                          'Prach',
+                          cartridge['powder'] != null
+                              ? cartridge['powder']['name']
+                              : 'Neznámý',
+                          6,
+                        ),
+                        _buildStripedInfoRow(
+                          'Navážka prachu',
+                          cartridge['powder_weight'] != null
+                              ? '${cartridge['powder_weight']} gr'
+                              : 'Neznámá',
+                          7,
+                        ),
+                        _buildStripedInfoRow(
+                          'OAL',
+                          cartridge['oal'] != null
+                              ? '${cartridge['oal']} mm'
+                              : 'Neznámá',
+                          8,
+                        ),
+                        _buildStripedInfoRow(
+                          'Rychlost',
+                          cartridge['velocity_ms'] != null
+                              ? '${cartridge['velocity_ms']} m/s'
+                              : 'Neznámá',
+                          9,
+                        ),
+                        _buildStripedInfoRow(
+                          'Standardní Deviace',
+                          cartridge['standard_deviation'] != null
+                              ? '${cartridge['standard_deviation']}'
+                              : 'Neznámá',
+                          10,
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed:
-                    isLoading ? null : () => _showShootingLogForm(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Přidat záznam'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blueGrey,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16.0),
-                  textStyle: const TextStyle(fontSize: 16),
+        bottomNavigationBar: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed:
+                      isLoading ? null : () => _showShootingLogForm(context),
+                  icon: const Icon(Icons.add, size: 20),
+                  label: const Text('Přidat záznam'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueGrey[600],
+                    foregroundColor: Colors.white,
+                    elevation: 2,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 14.0, horizontal: 12.0),
+                    textStyle: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: isLoading ? null : _showIncreaseStockDialog,
-                icon: const Icon(Icons.add_shopping_cart),
-                label: const Text('Navýšit zásobu'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16.0),
-                  textStyle: const TextStyle(fontSize: 16),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: isLoading ? null : _showIncreaseStockDialog,
+                  icon: const Icon(Icons.add_shopping_cart, size: 20),
+                  label: const Text('Navýšit zásobu'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueGrey[700],
+                    foregroundColor: Colors.white,
+                    elevation: 2,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 14.0, horizontal: 12.0),
+                    textStyle: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
+            ],
+          ),
+        ));
   }
 
   Widget _buildSectionTitle(String title) {

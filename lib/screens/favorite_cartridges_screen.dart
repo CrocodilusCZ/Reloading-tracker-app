@@ -1090,138 +1090,144 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
           : widget.reloadCartridges,
     );
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: filteredCartridges.length,
-      itemBuilder: (context, index) {
-        final cartridge = filteredCartridges[index];
-        final name = cartridge['name'] ?? 'Neznámý náboj';
+    return RefreshIndicator(
+      onRefresh: _refreshCartridges,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        itemCount: filteredCartridges.length,
+        itemBuilder: (context, index) {
+          final cartridge = filteredCartridges[index];
+          final name = cartridge['name'] ?? 'Neznámý náboj';
 
-        // Fix caliber name extraction
-        final caliberName = cartridge['caliber_name'] ??
-            (cartridge['caliber']?['name'] ?? 'Neznámý kalibr');
+          // Fix caliber name extraction
+          final caliberName = cartridge['caliber_name'] ??
+              (cartridge['caliber']?['name'] ?? 'Neznámý kalibr');
 
-        final stock = cartridge['stock_quantity'] ?? 0;
-        final hasBarcode =
-            cartridge['barcode'] != null && cartridge['barcode'] != '';
+          final stock = cartridge['stock_quantity'] ?? 0;
+          final hasBarcode =
+              cartridge['barcode'] != null && cartridge['barcode'] != '';
 
-        print('Debug: Cartridge data: ${cartridge.toString()}'); // Debug print
-        print('Debug: Caliber name: $caliberName'); // Debug print
+          print(
+              'Debug: Cartridge data: ${cartridge.toString()}'); // Debug print
+          print('Debug: Caliber name: $caliberName'); // Debug print
 
-        return Card(
-          elevation: 2,
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: InkWell(
-            onTap: () => _navigateToDetail(cartridge),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
+          return Card(
+            elevation: 2,
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: InkWell(
+              onTap: () => _navigateToDetail(cartridge),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF2C3E50).withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.adjust,
-                                    size: 14,
-                                    color: Color(0xFF2C3E50),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    _truncateCaliberName(caliberName),
-                                    style: const TextStyle(
-                                      fontSize: 14,
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      const Color(0xFF2C3E50).withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.adjust,
+                                      size: 14,
                                       color: Color(0xFF2C3E50),
                                     ),
-                                    overflow: TextOverflow.ellipsis,
-                                    maxLines: 1,
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      _truncateCaliberName(caliberName),
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Color(0xFF2C3E50),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: stock > 0
-                                    ? const Color(0xFF27AE60).withOpacity(0.1)
-                                    : Colors.red[100],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.inventory_2,
-                                    size: 14,
-                                    color: stock > 0
-                                        ? const Color(0xFF27AE60)
-                                        : Colors.red,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '$stock ks',
-                                    style: TextStyle(
-                                      fontSize: 14,
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: stock > 0
+                                      ? const Color(0xFF27AE60).withOpacity(0.1)
+                                      : Colors.red[100],
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.inventory_2,
+                                      size: 14,
                                       color: stock > 0
                                           ? const Color(0xFF27AE60)
                                           : Colors.red,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '$stock ks',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: stock > 0
+                                            ? const Color(0xFF27AE60)
+                                            : Colors.red,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (hasBarcode)
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                      ],
-                    ),
-                  ),
-                  if (hasBarcode)
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(8),
+                        child: const Icon(
+                          Icons.qr_code,
+                          size: 16,
+                          color: Colors.black54,
+                        ),
                       ),
-                      child: const Icon(
-                        Icons.qr_code,
-                        size: 16,
-                        color: Colors.black54,
-                      ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
