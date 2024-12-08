@@ -6,7 +6,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
 
 class ApiService {
-  // static const String baseUrl = 'http://10.0.2.2:8000/api';
+  //static const String baseUrl = 'http://10.0.2.2:8000/api';
+  //static const String baseUrl = 'http://10.20.0.89:8000/api';
   //static const String baseUrl = 'http://127.0.0.1:8000/api';
   //static const String baseUrl = 'http://10.20.0.69:8000/api';
   static final String baseUrl = 'https://www.reloading-tracker.cz/api';
@@ -281,14 +282,35 @@ class ApiService {
   }
 
   // Načtení seznamu střelnic uživatele
-  static Future<List<dynamic>> getUserRanges() async {
+  static Future<List<Map<String, dynamic>>> getUserRanges() async {
     try {
-      final ranges = await _get('ranges'); // Použití metody _get
-      print('Loaded ranges: ${ranges.length}');
-      return ranges as List<dynamic>;
+      // Kontrola připojení
+      final connectivityResult = await Connectivity().checkConnectivity();
+
+      if (connectivityResult == ConnectivityResult.none) {
+        print('Offline mode - načítám střelnice z SQLite');
+        return DatabaseHelper().getRanges();
+      }
+
+      // Online - zkusit API
+      final response =
+          await http.get(Uri.parse('${ApiService.baseUrl}/ranges'));
+
+      if (response.statusCode == 200) {
+        final List<Map<String, dynamic>> ranges =
+            List<Map<String, dynamic>>.from(json.decode(response.body));
+
+        // Uložit do SQLite pro offline použití
+        await DatabaseHelper().saveRanges(ranges);
+
+        return ranges;
+      } else {
+        throw Exception('Failed to load ranges');
+      }
     } catch (e) {
-      print('Chyba při načítání střelnic: $e');
-      rethrow;
+      print('API Error: $e');
+      // Fallback na SQLite při chybě
+      return DatabaseHelper().getRanges();
     }
   }
 
@@ -323,15 +345,20 @@ class ApiService {
   // Získání informací o náboji podle ID
   // Získání informací o náboji podle ID
   static Future<Map<String, dynamic>> getCartridgeById(int id) async {
-    final cookies = await _cookieJar.loadForRequest(Uri.parse(baseUrl));
-    print(
-        'Loading cookies for request: ${cookies.map((c) => '${c.name}=${c.value}').join('; ')}');
+    // Get token from SharedPreferences
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
 
     final response = await http.get(
       Uri.parse('$baseUrl/cartridges/$id'),
       headers: {
         'Content-Type': 'application/json',
-        'Cookie': cookies.map((c) => '${c.name}=${c.value}').join('; ')
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token', // Add authentication token
       },
     );
 

@@ -85,6 +85,66 @@ class DatabaseHelper {
     return _database!;
   }
 
+  Future<List<Map<String, dynamic>>> getRanges() async {
+    final db = await database;
+    return await db.query('ranges');
+  }
+
+  Future<void> saveRanges(List<Map<String, dynamic>> ranges) async {
+    final db = await database;
+
+    // Začít transakci
+    await db.transaction((txn) async {
+      // Smazat existující záznamy
+      await txn.delete('ranges');
+
+      // Vložit nové záznamy
+      for (var range in ranges) {
+        await txn.insert(
+          'ranges',
+          {
+            'id': range['id'],
+            'name': range['name'],
+            'location': range['location'] ?? '',
+            'hourly_rate': range['hourly_rate'] ?? 0.0,
+            'user_id': range['user_id'] ?? 1,
+            'created_at': range['created_at'],
+            'updated_at': range['updated_at'],
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
+  Future<Map<String, dynamic>?> getCartridgeByBarcode(String barcode) async {
+    final db = await database;
+    final List<Map<String, dynamic>> result = await db.query(
+      'cartridges',
+      where: 'barcode = ?',
+      whereArgs: [barcode],
+      limit: 1,
+    );
+
+    if (result.isEmpty) {
+      return null;
+    }
+
+    // Přidat informace o kalibru
+    final caliber = await db.query(
+      'calibers',
+      where: 'id = ?',
+      whereArgs: [result.first['caliber_id']],
+      limit: 1,
+    );
+
+    if (caliber.isNotEmpty) {
+      result.first['caliber'] = caliber.first;
+    }
+
+    return result.first;
+  }
+
   Future<void> saveWeapons(List<Map<String, dynamic>> weapons) async {
     final db = await database;
 

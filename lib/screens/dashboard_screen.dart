@@ -26,12 +26,13 @@ import 'package:shooting_companion/helpers/connectivity_helper.dart';
 import 'package:shooting_companion/services/sync_service.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:http/http.dart' as http;
+import 'package:shooting_companion/screens/target_photo_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
 
   const DashboardScreen({super.key, required this.username});
-  static const String currentVersion = "1.0.3"; // Aktuální verze aplikace
+  static const String currentVersion = "1.0.5"; // Aktuální verze aplikace
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
@@ -157,9 +158,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               builder: (BuildContext context) {
                 return AlertDialog(
                   title: const Text('Dostupná nová verze'),
-                  content:
-                      Text('Vaše verze: ${DashboardScreen.currentVersion}\n'
-                          'Dostupná verze: $latestVersion'),
+                  content: Text(
+                    'Vaše verze: ${DashboardScreen.currentVersion}\n'
+                    'Dostupná verze: $latestVersion\n\n'
+                    'DŮLEŽITÉ: Před instalací nové verze důrazně doporučujeme '
+                    'nejprve odinstalovat stávající verzi aplikace!',
+                  ),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),
@@ -701,58 +705,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => Scaffold(
-                            appBar: AppBar(
-                              title: const Text('Inventář nábojů'),
-                              backgroundColor: Colors.blueGrey,
-                            ),
-                            body: FutureBuilder<
-                                Map<String, List<Map<String, dynamic>>>>(
-                              future: _cartridgesFuture,
-                              builder: (context, snapshot) {
-                                if (snapshot.connectionState ==
-                                    ConnectionState.waiting) {
-                                  return const Center(
-                                      child: CircularProgressIndicator());
-                                } else if (snapshot.hasError) {
-                                  print(
-                                      "Chyba v FutureBuilder: ${snapshot.error}");
-                                  return Center(
-                                    child: Text(
-                                      'Chyba: ${snapshot.error}',
-                                      style: const TextStyle(
-                                          color: Colors.red, fontSize: 16),
-                                    ),
-                                  );
-                                } else if (!snapshot.hasData ||
-                                    (snapshot.data!['factory']?.isEmpty ??
-                                            true) &&
-                                        (snapshot.data!['reload']?.isEmpty ??
-                                            true)) {
-                                  print(
-                                      "Žádné náboje nenalezeny: ${snapshot.data}");
-                                  return const Center(
-                                    child: Text(
-                                      'Žádné náboje nenalezeny.',
-                                      style: TextStyle(
-                                          fontSize: 18, color: Colors.grey),
-                                    ),
-                                  );
-                                } else {
-                                  print(
-                                      "Předáváme data do FavoriteCartridgesScreen:");
-                                  print(
-                                      "Tovární: ${snapshot.data!['factory']}");
-                                  print(
-                                      "Přebíjené: ${snapshot.data!['reload']}");
-                                  return FavoriteCartridgesScreen(
-                                    factoryCartridges:
-                                        snapshot.data!['factory']!,
-                                    reloadCartridges: snapshot.data!['reload']!,
-                                  );
-                                }
-                              },
-                            )),
+                        builder: (context) => FutureBuilder<
+                            Map<String, List<Map<String, dynamic>>>>(
+                          future: _cartridgesFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const Scaffold(
+                                body:
+                                    Center(child: CircularProgressIndicator()),
+                              );
+                            }
+
+                            if (snapshot.hasError) {
+                              print("Chyba v FutureBuilder: ${snapshot.error}");
+                              return Scaffold(
+                                appBar: AppBar(
+                                  title: const Text('Inventář nábojů'),
+                                  backgroundColor: Colors.blueGrey,
+                                ),
+                                body: Center(
+                                  child: Text(
+                                    'Chyba: ${snapshot.error}',
+                                    style: const TextStyle(
+                                        color: Colors.red, fontSize: 16),
+                                  ),
+                                ),
+                              );
+                            }
+
+                            return FavoriteCartridgesScreen(
+                              factoryCartridges:
+                                  snapshot.data?['factory'] ?? [],
+                              reloadCartridges: snapshot.data?['reload'] ?? [],
+                            );
+                          },
+                        ),
                       ),
                     );
                   },
@@ -760,13 +748,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 16),
                 CustomButton(
                   icon: Icons.visibility,
-                  text: 'Stav skladu komponent',
+                  text: 'Sklad komponent',
                   color: Colors.blueGrey,
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) => InventoryComponentsScreen(),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                CustomButton(
+                  icon: Icons.camera_alt,
+                  text: 'Vyfotit terč',
+                  color: Colors.green,
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => TargetPhotoScreen(),
                       ),
                     );
                   },

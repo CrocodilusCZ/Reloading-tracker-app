@@ -585,30 +585,42 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Inventář nábojů'),
+        backgroundColor: Colors.blueGrey,
+        elevation: 0,
+      ),
       body: RefreshIndicator(
         onRefresh: _refreshCartridges,
         child: PageStorage(
           bucket: _bucket,
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : Column(
-                  children: [
-                    _buildToggleButtons(),
-                    _buildZeroStockSwitch(),
-                    _buildCaliberDropdown(),
-                    Expanded(
-                      child: TabBarView(
-                        controller: _tabController,
-                        children: [
-                          // Tovární náboje
-                          _buildCartridgeList(),
-                          // Přebíjené náboje
-                          _buildCartridgeList(),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+          child: Column(
+            children: [
+              _buildToggleButtons(),
+              _buildZeroStockSwitch(),
+              _buildCaliberDropdown(),
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : (_showFactoryCartridges
+                            ? widget.factoryCartridges.isEmpty
+                            : widget.reloadCartridges.isEmpty)
+                        ? const Center(
+                            child: Text(
+                              'Žádné náboje nenalezeny',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                          )
+                        : TabBarView(
+                            controller: _tabController,
+                            children: [
+                              _buildCartridgeList(),
+                              _buildCartridgeList(),
+                            ],
+                          ),
+              ),
+            ],
+          ),
         ),
       ),
       floatingActionButton: _showFactoryCartridges
