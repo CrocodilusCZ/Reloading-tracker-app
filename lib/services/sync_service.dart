@@ -9,6 +9,17 @@ class SyncService {
 
   SyncService(this.context);
 
+  void handleOnlineStateChange(bool isOnline) {
+    if (isOnline) {
+      print('Připojení obnoveno, spouštím synchronizaci...');
+      syncOfflineRequests().then((_) {
+        print('Synchronizace dokončena');
+      }).catchError((error) {
+        print('Chyba při synchronizaci: $error');
+      });
+    }
+  }
+
   // Synchronizace dat po přihlášení uživatele
 // Tato metoda kombinuje dvě různé operace:
 // 1. Synchronizaci dat s API (stahování dat z API do SQLite).
@@ -48,6 +59,8 @@ class SyncService {
 
       // Synchronizace zbraní
       await _syncWeapons(dbHelper);
+
+      await _syncTargetPhotos(dbHelper);
 
       print('Synchronizace všech dat dokončena.');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -124,25 +137,50 @@ class SyncService {
     }
   }
 
+  Future<void> _syncTargetPhotos(DatabaseHelper dbHelper) async {
+    try {
+      print('Synchronizuji fotky terčů...');
+      final unsyncedPhotos = await dbHelper.getUnsyncedPhotos();
+
+      for (var photo in unsyncedPhotos) {
+        try {
+          await ApiService.uploadTargetPhoto({
+            'photo_path': photo.photoPath,
+            'note': photo.note,
+            'created_at': photo.createdAt.toIso8601String()
+          });
+
+          await dbHelper.markPhotoAsSynced(photo.id);
+          print('Foto terče ID ${photo.id} úspěšně synchronizováno.');
+        } catch (e) {
+          print('Chyba při synchronizaci fota terče ID ${photo.id}: $e');
+        }
+      }
+      print('Synchronizace fotek terčů dokončena.');
+    } catch (e) {
+      print('Chyba při synchronizaci fotek terčů: $e');
+    }
+  }
+
   // Synchronizace neodeslaných požadavků
   Future<void> syncOfflineRequests() async {
     final db = await DatabaseHelper().database;
-
-    // Přidán log pro začátek synchronizace_syncWithApi
     print('Začínám synchronizaci offline požadavků...');
 
-    // Načtení všech "pending" požadavků
     final requests = await db.query(
       'offline_requests',
       where: 'status = ?',
       whereArgs: ['pending'],
     );
 
+    int syncedCount = 0;
+    Map<String, int> syncedTypes = {};
+
     print('Načteno ${requests.length} offline požadavků k synchronizaci.');
 
     for (var request in requests) {
       final requestType = request['request_type'];
-      final rawData = request['data']; // Hodnota může být Object?
+      final rawData = request['data'];
 
       if (rawData is! String) {
         print('Chyba: Hodnota dat v požadavku není typu String: $rawData');
@@ -150,17 +188,13 @@ class SyncService {
       }
 
       try {
-        final requestData = jsonDecode(rawData); // Zpracuj pouze validní String
-
-        // Přidán log pro aktuální typ požadavku
+        final requestData = jsonDecode(rawData);
         print(
             'Synchronizuji požadavek ID ${request['id']} typu $requestType s daty: $requestData');
 
-        // Rozhodni se podle typu požadavku
+        // Process request based on type
         switch (requestType) {
           case 'update_stock':
-            print(
-                'Provádím synchronizaci zásoby pro cartridge ID ${requestData['id']} s množstvím ${requestData['quantity']}');
             await ApiService.syncRequest(
               '/cartridges/${requestData['id']}/update-stock',
               {'quantity': requestData['quantity']},
@@ -168,15 +202,10 @@ class SyncService {
             break;
 
           case 'create_activity':
-            print('Vytvářím aktivitu s daty: $requestData');
-            await ApiService.syncRequest(
-              '/activities',
-              requestData,
-            );
+            await ApiService.syncRequest('/activities', requestData);
             break;
 
           case 'delete_activity':
-            print('Mažu aktivitu s ID ${requestData['id']}');
             await ApiService.syncRequest(
               '/activities/${requestData['id']}/delete',
               {},
@@ -184,9 +213,12 @@ class SyncService {
             break;
 
           case 'create_shooting_log':
-            print('Vytvářím střelecký záznam s daty: $requestData');
+            await ApiService.syncRequest('/shooting-logs', requestData);
+            break;
+
+          case 'upload_target_photo':
             await ApiService.syncRequest(
-              '/shooting-logs',
+              '/cartridges/${requestData['cartridge_id']}/targets',
               requestData,
             );
             break;
@@ -196,7 +228,7 @@ class SyncService {
             continue;
         }
 
-        // Po úspěchu nastav status na "completed"
+        // After successful API call, update DB status
         await db.update(
           'offline_requests',
           {'status': 'completed'},
@@ -204,11 +236,66 @@ class SyncService {
           whereArgs: [request['id']],
         );
 
+        // Only after DB update, increment counters
+        syncedCount++;
+        String type = request['request_type'] as String;
+        syncedTypes[type] = (syncedTypes[type] ?? 0) + 1;
+
         print('Požadavek ID ${request['id']} byl synchronizován úspěšně.');
       } catch (e) {
         print('Chyba při synchronizaci požadavku ID ${request['id']}: $e');
       }
     }
-    print('Synchronizace offline požadavků dokončena.');
+
+    if (syncedCount > 0) {
+      String details = syncedTypes.entries
+          .map((e) => '${e.value}x ${_getReadableType(e.key)}')
+          .join(', ');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.green.shade800,
+          duration: Duration(seconds: 4),
+          content: Row(
+            children: [
+              AnimatedRotation(
+                turns: 1,
+                duration: Duration(milliseconds: 500),
+                child: Icon(
+                  Icons.check_circle_outline,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Synchronizace dokončena\n$details',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          margin: EdgeInsets.all(8),
+        ),
+      );
+    }
+  }
+
+  String _getReadableType(String type) {
+    switch (type) {
+      case 'upload_target_photo':
+        return 'fotka terče';
+      case 'update_stock':
+        return 'aktualizace skladu';
+      case 'create_activity':
+        return 'aktivita';
+      default:
+        return type;
+    }
   }
 }

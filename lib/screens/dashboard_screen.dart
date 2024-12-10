@@ -27,18 +27,20 @@ import 'package:shooting_companion/services/sync_service.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:http/http.dart' as http;
 import 'package:shooting_companion/screens/target_photo_screen.dart';
+import 'package:shooting_companion/widgets/connectivity_monitor.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
 
   const DashboardScreen({super.key, required this.username});
-  static const String currentVersion = "1.0.5"; // Aktuální verze aplikace
+  static const String currentVersion = "1.0.6"; // Aktuální verze aplikace
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  final ConnectivityHelper _connectivityHelper = ConnectivityHelper();
   late String username;
   bool isRangeInitialized = false;
   late Future<Map<String, List<Map<String, dynamic>>>> _cartridgesFuture;
@@ -54,27 +56,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _checkVersion();
     username = widget.username;
 
-    // Inicializace SyncService
+    // Nejdřív inicializujeme SyncService
     _syncService = SyncService(context);
 
-    _connectivityMonitor = ConnectivityMonitor(
-      context: context,
-      onConnectionChange: (bool isConnected) {
-        setState(() {
-          isOnline = isConnected; // Aktualizuje stav připojení
-        });
-
-        // Synchronizace při obnovení připojení
-        if (isOnline) {
-          _syncService.syncOfflineRequests().then((_) {
-            print("Offline požadavky byly synchronizovány.");
-          }).catchError((e) {
-            print("Chyba při synchronizaci offline požadavků: $e");
-          });
-        }
-      },
-    );
-    _connectivityMonitor.startMonitoring(); // Spuštění sledování připojení
+    // Registrujeme SyncService do ConnectivityHelper
+    _connectivityHelper.registerSyncService(_syncService);
 
     // Inicializace _cartridgesFuture pro načtení dat
     _cartridgesFuture = _syncService.syncWithApi().then((_) async {
@@ -444,20 +430,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return ConnectivityMonitor(
+        child: Scaffold(
       appBar: AppBar(
         title: Text(
           'Shooting Companion',
           style: const TextStyle(
-            fontSize: 20, // Větší text
-            fontWeight: FontWeight.bold, // Tučné písmo
-            color: Colors.white, // Barva textu
-            letterSpacing: 1.2, // Mírně zvětšené mezery mezi písmeny
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+            letterSpacing: 1.2,
             shadows: [
               Shadow(
-                offset: Offset(2, 2), // Posunutí stínu
-                color: Colors.black54, // Barva stínu
-                blurRadius: 4, // Mírné rozmazání stínu
+                offset: Offset(2, 2),
+                color: Colors.black54,
+                blurRadius: 4,
               ),
             ],
           ),
@@ -465,23 +452,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
         centerTitle: true,
         backgroundColor: Colors.blueGrey,
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0), // Větší mezera vpravo
-            child: Tooltip(
-              message: isOnline ? 'Online' : 'Offline',
-              child: AnimatedSwitcher(
-                duration: const Duration(
-                    milliseconds: 300), // Jemná animace při změně
-                child: Icon(
-                  isOnline ? Icons.cloud_done : Icons.cloud_off, // Ikony Cloud
-                  key: ValueKey(isOnline), // Klíč pro přepínání ikon
-                  color: isOnline
-                      ? Colors.lightBlueAccent
-                      : Colors.grey.shade500, // Jemné barvy
-                  size: 28, // Větší velikost ikony
+          StreamBuilder<bool>(
+            stream: _connectivityHelper.onConnectionChange,
+            builder: (context, snapshot) {
+              final isOnline = snapshot.data ?? false;
+              return Padding(
+                padding: const EdgeInsets.only(right: 16.0),
+                child: Tooltip(
+                  message: isOnline ? 'Online' : 'Offline',
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Icon(
+                      isOnline ? Icons.cloud_done : Icons.cloud_off,
+                      key: ValueKey(isOnline),
+                      color: isOnline
+                          ? Colors.lightBlueAccent
+                          : Colors.grey.shade500,
+                      size: 28,
+                    ),
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ],
       ),
@@ -775,7 +767,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ],
             ),
-    );
+    ));
   }
 
   void _deleteDatabase() async {
@@ -803,7 +795,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    _connectivityMonitor.stopMonitoring(); // Ukončení sledování připojení
     super.dispose();
   }
 }

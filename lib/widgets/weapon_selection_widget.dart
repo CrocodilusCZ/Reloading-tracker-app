@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:shooting_companion/services/api_service.dart';
+import 'package:shooting_companion/helpers/connectivity_helper.dart';
+import 'package:shooting_companion/helpers/database_helper.dart';
 
 class WeaponSelectionWidget extends StatefulWidget {
-  final String? cartridgeId;
+  final String? caliberId; // Changed from cartridgeId
   final Function(String) onWeaponSelected;
 
   const WeaponSelectionWidget({
     Key? key,
-    required this.cartridgeId,
+    required this.caliberId, // Changed from cartridgeId
     required this.onWeaponSelected,
   }) : super(key: key);
 
@@ -19,11 +21,13 @@ class _WeaponSelectionWidgetState extends State<WeaponSelectionWidget> {
   String? selectedWeaponId;
   List<Map<String, dynamic>> weapons = [];
   bool isLoading = true;
+  final DatabaseHelper _dbHelper = DatabaseHelper();
 
   @override
   void initState() {
     super.initState();
-    if (widget.cartridgeId != null) {
+    if (widget.caliberId != null) {
+      // Changed from cartridgeId
       _loadWeapons();
     }
   }
@@ -31,44 +35,36 @@ class _WeaponSelectionWidgetState extends State<WeaponSelectionWidget> {
   @override
   void didUpdateWidget(WeaponSelectionWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.cartridgeId != oldWidget.cartridgeId) {
+    if (widget.caliberId != oldWidget.caliberId) {
+      // Changed from cartridgeId
       _loadWeapons();
     }
   }
 
   Future<void> _loadWeapons() async {
-    if (widget.cartridgeId == null) return;
+    if (widget.caliberId == null) return; // Changed from cartridgeId
 
     setState(() => isLoading = true);
     try {
-      // First get cartridge details to get caliber ID
-      final cartridge =
-          await ApiService.getCartridgeById(int.parse(widget.cartridgeId!));
-
-      // Extract caliber ID from cartridge
-      final caliberId = cartridge['caliber']['id'];
-      print(
-          'Načítám zbraně pro kalibr ID: $caliberId z náboje ID: ${widget.cartridgeId}');
-
-      // Then load weapons for that caliber
-      final weaponsList = await ApiService.getUserWeaponsByCaliber(caliberId);
+      final caliberId =
+          int.parse(widget.caliberId!); // Changed from cartridgeId
+      final localWeapons = await DatabaseHelper.getWeaponsByCaliber(caliberId);
 
       setState(() {
-        weapons = weaponsList;
+        weapons = localWeapons;
         isLoading = false;
       });
     } catch (e) {
-      print('Chyba při načítání zbraní: $e');
+      print('ERROR: Failed to load weapons: $e');
       setState(() => isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Chyba při načítání zbraní: $e')),
-      );
     }
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
-    if (widget.cartridgeId == null) {
+    if (widget.caliberId == null) {
+      // Changed from cartridgeId
       return Text('Nejdříve vyberte náboj');
     }
 

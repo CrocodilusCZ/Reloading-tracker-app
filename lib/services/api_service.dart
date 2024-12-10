@@ -4,6 +4,7 @@ import 'package:cookie_jar/cookie_jar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
+import 'package:dio/dio.dart';
 
 class ApiService {
   //static const String baseUrl = 'http://10.0.2.2:8000/api';
@@ -110,38 +111,77 @@ class ApiService {
       throw Exception('Token nebyl nalezen. Přihlas se.');
     }
 
-    // Oprava klíče 'quantity' na 'amount', pokud existuje
-    if (data.containsKey('quantity')) {
-      data['amount'] = data.remove('quantity'); // Opravená závorka
-    }
-
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl$endpoint'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json', // Přidání hlavičky Accept
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(data),
+      final dio = await _getDioInstance();
+
+      // Remove any /api/ prefix and add it back once
+      final cleanEndpoint =
+          endpoint.replaceAll('/api/', '/').replaceAll('//', '/');
+      final apiEndpoint =
+          cleanEndpoint.startsWith('/') ? cleanEndpoint : '/$cleanEndpoint';
+
+      print("DEBUG: Base URL: $baseUrl");
+      print("DEBUG: Clean endpoint: $apiEndpoint");
+      print("DEBUG: Full URL: $baseUrl$apiEndpoint");
+      print("DEBUG: Headers: ${dio.options.headers}");
+
+      if (endpoint.contains('/cartridges/') && endpoint.endsWith('/targets')) {
+        final formData = FormData.fromMap({
+          'image': await MultipartFile.fromFile(
+            // Changed from 'photo' to 'image'
+            data['photo_path'],
+            filename: data['photo_path'].split('/').last,
+          ),
+          'note': data['notes'] ?? '',
+          'weapon_id': data['weapon_id'].toString(),
+          'distance': (data['distance'] ?? '').toString(),
+          'created_at': DateTime.now().toIso8601String(),
+        });
+
+        print("DEBUG: FormData fields: ${formData.fields}");
+
+        final response = await dio.post(
+          '$baseUrl$apiEndpoint',
+          data: formData,
+          options: Options(
+            validateStatus: (status) => status! < 500,
+            contentType: 'multipart/form-data',
+          ),
+        );
+
+        print("DEBUG: Raw response: ${response.data}");
+        if (response.statusCode != 200 && response.statusCode != 201) {
+          throw Exception(
+              "Upload failed: ${response.statusCode}\nBody: ${response.data}");
+        }
+        return;
+      }
+
+      // Standardní požadavky
+      if (data.containsKey('quantity')) {
+        data['amount'] = data.remove('quantity');
+      }
+
+      print("Odesílám standardní požadavek s daty: $data");
+
+      final response = await dio.post(
+        '$baseUrl$apiEndpoint',
+        data: data,
       );
 
-      print("Požadavek na $endpoint: Status Code ${response.statusCode}");
-      print("Odeslaná data: $data");
+      print("Response status: ${response.statusCode}");
+      print("Response data: ${response.data}");
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final responseData = jsonDecode(response.body);
-        print("Odpověď API: $responseData");
-
-        if (responseData['success'] == true) {
-          print("Synchronizace byla úspěšná.");
-        } else {
-          throw Exception("API chyba: ${responseData['message']}");
-        }
-      } else {
-        print("Chyba: ${response.body}");
-        throw Exception("Chyba při volání $endpoint: ${response.statusCode}");
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception(
+            "Chyba při volání $apiEndpoint: ${response.statusCode}");
       }
+
+      if (response.data['success'] == false) {
+        throw Exception("API chyba: ${response.data['message']}");
+      }
+
+      print("Požadavek úspěšně zpracován");
     } catch (e) {
       print("Chyba při volání API: $e");
       rethrow;
@@ -292,9 +332,22 @@ class ApiService {
         return DatabaseHelper().getRanges();
       }
 
-      // Online - zkusit API
-      final response =
-          await http.get(Uri.parse('${ApiService.baseUrl}/ranges'));
+      // Získat token
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? token = prefs.getString('api_token');
+
+      if (token == null) {
+        throw Exception('No token found. Please login.');
+      }
+
+      // Online - zkusit API s JSON header a auth token
+      final response = await http.get(
+        Uri.parse('${ApiService.baseUrl}/ranges'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
+      );
 
       if (response.statusCode == 200) {
         final List<Map<String, dynamic>> ranges =
@@ -342,7 +395,6 @@ class ApiService {
     }
   }
 
-  // Získání informací o náboji podle ID
   // Získání informací o náboji podle ID
   static Future<Map<String, dynamic>> getCartridgeById(int id) async {
     // Get token from SharedPreferences
@@ -621,8 +673,6 @@ class ApiService {
     }
   }
 
-  // Získání seznamu všech nábojů a následné rozdělení na tovární a přebíjené
-
   // Metoda pro získání skladových zásob komponent
   static Future<Map<String, List<Map<String, dynamic>>>>
       getInventoryComponents() async {
@@ -812,6 +862,49 @@ class ApiService {
     } catch (e) {
       print('Chyba při komunikaci s API: $e');
       rethrow;
+    }
+  }
+
+  static Future<Dio> _getDioInstance() async {
+    final dio = Dio(BaseOptions(
+      baseUrl: baseUrl,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'multipart/form-data',
+      },
+    ));
+
+    // Přidání auth tokenu pokud existuje
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    if (token != null) {
+      dio.options.headers['Authorization'] = 'Bearer $token';
+    }
+
+    return dio;
+  }
+
+  static Future<void> uploadTargetPhoto(Map<String, dynamic> data) async {
+    try {
+      final dio = await _getDioInstance();
+
+      // Vytvoření FormData pro upload souboru
+      final formData = FormData.fromMap({
+        'photo': await MultipartFile.fromFile(
+          data['photo_path'],
+          filename: data['photo_path'].split('/').last,
+        ),
+        'note': data['note'],
+        'created_at': data['created_at'],
+      });
+
+      await dio.post(
+        '$baseUrl/target-photos',
+        data: formData,
+      );
+    } catch (e) {
+      print('Chyba při nahrávání fotky terče: $e');
+      throw e;
     }
   }
 

@@ -1,68 +1,111 @@
+import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:shooting_companion/services/sync_service.dart';
 
 class ConnectivityHelper {
-  static final _checker = InternetConnection();
+  final _connectivity = Connectivity();
+  late StreamSubscription<List<ConnectivityResult>> _subscription;
+  final _controller = StreamController<bool>.broadcast();
+  bool _isOnline = false;
+  VoidCallback? _onlineCallback;
+  late SyncService _syncService;
 
-  static Future<bool> isOnline() async {
+  ConnectivityHelper() {
+    _initConnectivity();
+    _setupConnectivityStream();
+  }
+
+  void setOnlineCallback(VoidCallback callback) {
+    _onlineCallback = callback;
+  }
+
+  void registerSyncService(SyncService syncService) {
+    _syncService = syncService;
+    onConnectionChange.listen((isOnline) {
+      if (isOnline) {
+        _syncService.handleOnlineStateChange(true);
+      }
+    });
+  }
+
+  Future<void> _initConnectivity() async {
     try {
-      return await _checker.hasInternetAccess;
+      final results = await _connectivity.checkConnectivity();
+      final result = results is List
+          ? (results as List<ConnectivityResult>).firstOrNull ??
+              ConnectivityResult.none
+          : results as ConnectivityResult;
+      _updateConnectionStatus(result);
+    } catch (e) {
+      print('Error checking connectivity: $e');
+    }
+  }
+
+  void _setupConnectivityStream() {
+    _subscription = _connectivity.onConnectivityChanged.listen(
+      (List<ConnectivityResult> results) {
+        final result =
+            results.isNotEmpty ? results.first : ConnectivityResult.none;
+        _updateConnectionStatus(result);
+      },
+    );
+  }
+
+  void _updateConnectionStatus(ConnectivityResult result) {
+    final isOnline = result != ConnectivityResult.none;
+    if (_isOnline != isOnline) {
+      _isOnline = isOnline;
+      _controller.add(isOnline);
+      print('Connection status changed: $result, isOnline: $_isOnline');
+
+      // Spustit synchronizaci při obnovení připojení
+      if (isOnline && _onlineCallback != null) {
+        _onlineCallback!();
+      }
+    }
+  }
+
+  Future<bool> hasInternetConnection() async {
+    try {
+      final result = await _connectivity.checkConnectivity();
+      if (result == ConnectivityResult.none) {
+        return false;
+      }
+
+      // Skutečná kontrola připojení k internetu
+      final response = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 5));
+      return response.isNotEmpty && response[0].rawAddress.isNotEmpty;
+    } on SocketException catch (_) {
+      return false;
+    } on TimeoutException catch (_) {
+      return false;
     } catch (e) {
       print('Error checking internet connection: $e');
       return false;
     }
   }
 
-  static Future<bool> isOffline() async {
-    return !(await isOnline());
-  }
-}
+  bool get isOnline => _isOnline;
 
-class ConnectivityMonitor {
-  final BuildContext context;
-  final Function(bool) onConnectionChange;
-  final _checker = InternetConnection();
-  late StreamSubscription<InternetStatus> _subscription;
+  Stream<bool> get onConnectionChange => _controller.stream;
 
-  ConnectivityMonitor({
-    required this.context,
-    required this.onConnectionChange,
-  });
-
-  Future<void> startMonitoring() async {
-    final initialStatus = await ConnectivityHelper.isOnline();
-    print('Initial connectivity status: $initialStatus'); // Debug print
-    _handleConnectionChange(initialStatus);
-
-    _subscription = _checker.onStatusChange.listen(
-      (InternetStatus status) {
-        final isOnline = status == InternetStatus.connected;
-        print(
-            'Connection status changed: $status, isOnline: $isOnline'); // Debug print
-        _handleConnectionChange(isOnline);
-      },
-    );
+  Future<void> dispose() async {
+    await _subscription.cancel();
+    await _controller.close();
   }
 
-  void _handleConnectionChange(bool isOnline) {
-    onConnectionChange(isOnline);
-
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            isOnline
-                ? 'Jste online. Data se budou synchronizovat s API.'
-                : 'Jste offline. Data budou načtena z lokální databáze.',
-          ),
-          duration: const Duration(seconds: 3),
+  static void showNoInternetSnackBar(BuildContext context) {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Není k dispozici připojení k internetu'),
+          duration: Duration(seconds: 3),
         ),
       );
-  }
-
-  void stopMonitoring() {
-    _subscription.cancel();
+    });
   }
 }

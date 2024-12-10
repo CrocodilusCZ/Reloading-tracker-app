@@ -112,6 +112,15 @@ class DatabaseSchema {
       )''');
       print("Tabulka weapon_calibers vytvořena.");
 
+      await db.execute('''CREATE TABLE IF NOT EXISTS target_photos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        photo_path TEXT NOT NULL,
+        note TEXT,
+        created_at DATETIME NOT NULL,
+        is_synced INTEGER DEFAULT 0
+      )''');
+      print("Tabulka target_photos vytvořena.");
+
       await db.execute('''CREATE TABLE IF NOT EXISTS requests (
         id INTEGER PRIMARY KEY,
         request_type TEXT,

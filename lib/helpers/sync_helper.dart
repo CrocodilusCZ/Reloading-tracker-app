@@ -4,7 +4,8 @@ import 'package:shooting_companion/helpers/database_helper.dart';
 import 'package:shooting_companion/helpers/connectivity_helper.dart';
 
 Future<void> syncData() async {
-  bool online = await ConnectivityHelper.isOnline();
+  final connectivityHelper = ConnectivityHelper();
+  bool online = await connectivityHelper.hasInternetConnection();
 
   if (online) {
     // Pokud je připojení k internetu, synchronizujeme data

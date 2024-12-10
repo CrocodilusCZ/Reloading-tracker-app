@@ -10,6 +10,7 @@ import 'dart:convert'; // Pro práci s JSON¨
 import 'package:flutter/material.dart';
 import 'package:shooting_companion/database/database_schema.dart';
 import 'package:shooting_companion/models/cartridge.dart';
+import 'package:shooting_companion/models/target_photo_request.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
@@ -54,29 +55,69 @@ class DatabaseHelper {
       int caliberId) async {
     final db = await DatabaseHelper().database;
 
-    // SQL dotaz pro propojení weapons a calibers přes weapon_calibers
+    // Get weapons by caliber ID (not cartridge ID)
     String query = '''
-  SELECT 
-    weapons.id AS weapon_id,
-    weapons.name AS weapon_name,
-    calibers.id AS caliber_id,
-    calibers.name AS caliber_name
-  FROM weapons
-  JOIN weapon_calibers ON weapons.id = weapon_calibers.weapon_id
-  JOIN calibers ON weapon_calibers.caliber_id = calibers.id
-  WHERE calibers.id = ?
+    SELECT DISTINCT
+      w.*,
+      c.id AS caliber_id,
+      c.name AS caliber_name
+    FROM weapons w
+    INNER JOIN weapon_calibers wc ON w.id = wc.weapon_id
+    INNER JOIN calibers c ON wc.caliber_id = c.id
+    WHERE c.id = ?
   ''';
 
-    // Provede dotaz s daným caliberId
-    final result = await db.rawQuery(query, [caliberId]);
+    try {
+      final result = await db.rawQuery(query, [caliberId]);
 
-    if (result.isEmpty) {
-      print('Debug: Žádné zbraně nenalezeny pro caliberId=$caliberId');
-    } else {
-      print('Debug: Výsledek dotazu pro caliberId=$caliberId: $result');
+      if (result.isEmpty) {
+        print('Debug: Žádné zbraně nenalezeny pro kaliber ID=$caliberId');
+      } else {
+        print(
+            'Debug: Nalezeno ${result.length} zbraní pro kaliber ID=$caliberId');
+      }
+
+      return result;
+    } catch (e) {
+      print('Error: Chyba při načítání zbraní pro kaliber ID=$caliberId: $e');
+      return [];
     }
+  }
 
-    return result;
+  static Future<int?> getCaliberIdFromCartridge(int cartridgeId) async {
+    final db = await DatabaseHelper().database;
+
+    try {
+      print('DEBUG: Querying caliber_id for cartridge ID: $cartridgeId');
+
+      final result = await db.query(
+        'cartridges',
+        columns: ['caliber_id'],
+        where: 'id = ?',
+        whereArgs: [cartridgeId],
+      );
+
+      print('DEBUG: Query result: $result');
+
+      if (result.isEmpty) {
+        print('DEBUG: No cartridge found with ID: $cartridgeId');
+        return null;
+      }
+
+      final caliberId = result.first['caliber_id'] as int?;
+      print(
+          'DEBUG: Found caliber_id: $caliberId for cartridge ID: $cartridgeId');
+
+      return caliberId;
+    } catch (e) {
+      print('ERROR: Failed to get caliber_id: $e');
+      return null;
+    }
+  }
+
+  Future<int> insertOfflineRequest(Map<String, dynamic> request) async {
+    final db = await database;
+    return await db.insert('offline_requests', request);
   }
 
   Future<Database> get database async {
@@ -964,6 +1005,78 @@ class DatabaseHelper {
     }
   }
 
+  Future<List<Map<String, dynamic>>> getAllCartridges() async {
+    final db = await database;
+    try {
+      final List<Map<String, dynamic>> cartridges =
+          await db.query('cartridges');
+      print('Načteno ${cartridges.length} nábojů z lokální DB.');
+      return cartridges;
+    } catch (e) {
+      print('Chyba při načítání nábojů z DB: $e');
+      return [];
+    }
+  }
+
+  Future<void> cacheWeapons(List<Map<String, dynamic>> weapons) async {
+    final db = await database;
+
+    await db.transaction((txn) async {
+      try {
+        // Clear existing weapons and relationships
+        await txn.delete('weapons');
+        await txn.delete('weapon_calibers');
+
+        // Insert weapons
+        for (var weapon in weapons) {
+          final weaponId = await txn.insert('weapons', {
+            'id': weapon['id'],
+            'name': weapon['name'],
+            'user_id': weapon['user_id'],
+            'created_at': weapon['created_at'],
+            'updated_at': weapon['updated_at'],
+            'initial_shots': weapon['initial_shots'] ?? 0,
+          });
+
+          // Insert weapon-caliber relationships
+          if (weapon['calibers'] != null) {
+            for (var caliber in weapon['calibers']) {
+              await txn.insert('weapon_calibers', {
+                'weapon_id': weaponId,
+                'caliber_id': caliber['id'],
+              });
+            }
+          }
+        }
+
+        print(
+            'DEBUG: Cached ${weapons.length} weapons with their caliber relationships');
+      } catch (e) {
+        print('ERROR: Failed to cache weapons: $e');
+        rethrow;
+      }
+    });
+  }
+
+  Future<void> cacheCartridges(List<Map<String, dynamic>> cartridges) async {
+    final db = await database;
+    final batch = db.batch();
+
+    try {
+      // Clear existing cache
+      await db.delete('cartridges');
+
+      // Insert new data
+      for (var cartridge in cartridges) {
+        await db.insert('cartridges', cartridge);
+      }
+
+      print('Uloženo ${cartridges.length} nábojů do lokální DB.');
+    } catch (e) {
+      print('Chyba při ukládání nábojů do DB: $e');
+    }
+  }
+
   Future<void> debugCartridgeSync() async {
     final db = await database;
 
@@ -985,6 +1098,47 @@ class DatabaseHelper {
     } catch (e) {
       print("Chyba při debugování synchronizace nábojů: $e");
     }
+  }
+
+  //Fuknce pro Fotky terčů
+  Future<int> insertTargetPhoto(TargetPhotoRequest photo) async {
+    final db = await database;
+    return await db.insert('target_photos', {
+      'photo_path': photo.photoPath,
+      'note': photo.note,
+      'created_at': photo.createdAt.toIso8601String(),
+      'is_synced': 0
+    });
+  }
+
+  Future<List<TargetPhotoRequest>> getUnsyncedPhotos() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'target_photos',
+      where: 'is_synced = ?',
+      whereArgs: [0],
+    );
+
+    return maps.map((map) => TargetPhotoRequest.fromJson(map)).toList();
+  }
+
+  Future<void> markPhotoAsSynced(int id) async {
+    final db = await database;
+    await db.update(
+      'target_photos',
+      {'is_synced': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteTargetPhoto(int id) async {
+    final db = await database;
+    await db.delete(
+      'target_photos',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
 // Funkce pro výchozí hodnoty sloupců
