@@ -19,6 +19,9 @@ class InventoryComponentsScreen extends StatelessWidget {
           ),
           backgroundColor: Colors.blueGrey[800],
           elevation: 0,
+          iconTheme: const IconThemeData(
+            color: Colors.white, // Makes back arrow white
+          ),
           bottom: TabBar(
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white60,

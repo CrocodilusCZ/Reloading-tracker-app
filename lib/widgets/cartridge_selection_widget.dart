@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shooting_companion/services/api_service.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
 import 'package:shooting_companion/helpers/connectivity_helper.dart';
+import 'package:qr_code_scanner/qr_code_scanner.dart';
+import '../screens/qr_scan_screen.dart';
 
 class CartridgeSelectionWidget extends StatefulWidget {
   final Function(String cartridgeId, String caliberId) onCartridgeSelected;
@@ -99,6 +101,98 @@ class _CartridgeSelectionWidgetState extends State<CartridgeSelectionWidget> {
     }
   }
 
+  // Add this method to CartridgeSelectionWidget class
+  Future<void> _handleBarcodeScanning() async {
+    try {
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const QRScanScreen(),
+        ),
+      );
+
+      if (result == null) return;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vyhledávání náboje...')),
+      );
+
+      print('Scan result type: ${result.runtimeType}');
+      print('Scan result value: $result');
+
+      final String scannedBarcode = result.toString().trim();
+      if (scannedBarcode.isEmpty) {
+        throw Exception('Prázdný čárový kód');
+      }
+
+      final bool isOnline = await ConnectivityHelper().hasInternetConnection();
+      print('Connection status: ${isOnline ? "Online" : "Offline"}');
+
+      Map<String, dynamic>? response;
+      try {
+        if (isOnline) {
+          print('Fetching from API: $scannedBarcode');
+          response = await ApiService.checkBarcode(scannedBarcode);
+          print('API response: $response');
+        } else {
+          print('Fetching from local DB: $scannedBarcode');
+          response =
+              await DatabaseHelper().getCartridgeByBarcode(scannedBarcode);
+          print('DB response: $response');
+        }
+      } catch (e) {
+        print('Data fetch error: $e');
+        throw Exception(isOnline
+            ? 'Chyba při komunikaci s API'
+            : 'Chyba při čtení z databáze');
+      }
+
+      if (response == null || !response.containsKey('exists')) {
+        throw Exception(isOnline
+            ? 'Neplatná odpověď z API'
+            : 'Neplatná odpověď z databáze');
+      }
+
+      final cartridge = response['cartridge'];
+      if (cartridge == null) {
+        throw Exception('Náboj nebyl nalezen');
+      }
+
+      if (!cartridge.containsKey('id') ||
+          !cartridge.containsKey('caliber_id')) {
+        print('Invalid cartridge data: $cartridge');
+        throw Exception('Neplatná data náboje');
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+
+      setState(() {
+        selectedCartridgeId =
+            cartridge['id'].toString(); // Update existing state variable
+      });
+
+      widget.onCartridgeSelected(
+        cartridge['id'].toString(),
+        cartridge['caliber_id'].toString(),
+      );
+    } catch (e, stackTrace) {
+      print('Error in barcode scanning: $e');
+      print('Stack trace: $stackTrace');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().contains('Exception:')
+              ? e.toString().replaceAll('Exception: ', '')
+              : 'Chyba při skenování'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -108,11 +202,9 @@ class _CartridgeSelectionWidgetState extends State<CartridgeSelectionWidget> {
     return Column(
       children: [
         ElevatedButton.icon(
-          onPressed: () async {
-            // TODO: Implement barcode scanning
-          },
-          icon: Icon(Icons.qr_code_scanner),
-          label: Text('Naskenovat kód'),
+          onPressed: _handleBarcodeScanning,
+          icon: const Icon(Icons.qr_code_scanner),
+          label: const Text('Naskenovat kód'),
         ),
         SizedBox(height: 16),
         Row(

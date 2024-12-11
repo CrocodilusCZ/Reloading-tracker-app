@@ -69,9 +69,11 @@ class _QRScanScreenState extends State<QRScanScreen> {
         setState(() {
           isProcessing = true;
         });
-        controller.pauseCamera(); // Zastaví kameru po naskenování
-        _processScannedData(
-            scanData.code!); // Použijte '!', protože scanData.code už není null
+
+        print('QRScanScreen: Raw scanned code: ${scanData.code}'); // Debug
+
+        controller.pauseCamera();
+        Navigator.of(context).pop(scanData.code); // Return raw code
       }
     });
   }
