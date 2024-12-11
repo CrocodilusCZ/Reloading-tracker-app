@@ -6,6 +6,8 @@ import 'dart:math';
 import 'package:shooting_companion/services/api_service.dart'; // Import API služby
 import 'package:vibration/vibration.dart'; // Import balíčku vibration
 import 'package:shooting_companion/services/weapon_service.dart';
+import 'package:shooting_companion/helpers/database_helper.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class ShootingLogScreen extends StatefulWidget {
   const ShootingLogScreen({Key? key}) : super(key: key);
@@ -283,6 +285,11 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     }
   }
 
+  Future<bool> isOnline() async {
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    return connectivityResult != ConnectivityResult.none;
+  }
+
   //Ovládání svítilny
   Future<void> _toggleFlash() async {
     try {
@@ -330,40 +337,50 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     );
   }
 
+  // Add to _fetchCartridgeInfo method:
   Future<void> _fetchCartridgeInfo(String code) async {
-    print('Volání API pro kód: $code');
+    print('Hledám náboj pro kód: $code');
+
     try {
-      final response = await ApiService.checkBarcode(code); // Volání API služby
-      print('Odpověď z API: $response');
+      // Get database helper instance
+      final dbHelper = DatabaseHelper();
 
-      if (response.containsKey('cartridge') && response['cartridge'] != null) {
-        print('Data náboje nalezena: ${response['cartridge']}');
+      // First try local database
+      final localCartridge = await dbHelper.getCartridgeByBarcode(code);
+      print('Database query result: $localCartridge');
+
+      if (localCartridge != null) {
+        print('Náboj nalezen v lokální DB');
         setState(() {
-          cartridgeData = response; // Uložení dat o náboji
-          cartridgeInfo = 'Náboj: ${response['cartridge']['name']}\n'
-              'Kalibr: ${response['cartridge']['caliber']['name']}\n'
-              'Sklad: ${response['cartridge']['stock_quantity']} ks';
+          // Format the data in the same structure as API response
+          cartridgeData = {
+            'cartridge': {
+              ...localCartridge,
+              'caliber': {
+                'id': localCartridge['caliber_id'],
+                'name': localCartridge['caliber_name']
+              }
+            }
+          };
+          cartridgeInfo = 'Náboj: ${localCartridge['name']}\n'
+              'Kalibr: ${localCartridge['caliber_name']}\n'
+              'Sklad: ${localCartridge['stock_quantity']} ks';
         });
-
-        // Zobrazení dialogu s informacemi o náboji
         _showCartridgeInfoDialog();
-      } else {
-        print('Náboj nebyl nalezen');
-        setState(() {
-          cartridgeInfo = 'Náboj nebyl nalezen';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Náboj nebyl nalezen.')),
-        );
+        return;
       }
-    } catch (e) {
-      print('Chyba při volání API: $e');
-      setState(() {
-        cartridgeInfo = 'Chyba při volání API';
-      });
+
+      // If not found locally, show error
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chyba při načítání dat.')),
+        const SnackBar(content: Text('Náboj nebyl nalezen v lokální databázi')),
       );
+    } catch (e) {
+      print('Chyba při hledání náboje: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      controller?.resumeCamera();
     }
   }
 
@@ -402,19 +419,42 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   // Volání API pro získání aktivit uživatele
   Future<void> _fetchUserActivities() async {
     setState(() {
-      isLoading = true; // Začátek načítání
+      isLoading = true;
     });
+
     try {
-      final activitiesResponse =
-          await ApiService.getUserActivities(); // Volání API
-      setState(() {
-        userActivities = activitiesResponse; // Uložení aktivit uživatele
-      });
+      final bool online = await isOnline();
+
+      if (online) {
+        try {
+          final activitiesResponse = await ApiService.getUserActivities();
+          setState(() {
+            userActivities = activitiesResponse;
+          });
+        } catch (e) {
+          print('Chyba při online načítání aktivit: $e');
+          // Fallback to offline
+          final localActivities = await DatabaseHelper().getActivities();
+          setState(() {
+            userActivities = localActivities;
+          });
+        }
+      } else {
+        // Offline mode
+        print('Načítám aktivity z offline databáze...');
+        final localActivities = await DatabaseHelper().getActivities();
+        setState(() {
+          userActivities = localActivities;
+        });
+      }
     } catch (e) {
       print('Chyba při načítání aktivit: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Chyba při načítání aktivit')),
+      );
     } finally {
       setState(() {
-        isLoading = false; // Konec načítání
+        isLoading = false;
       });
     }
   }
@@ -457,6 +497,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
   }
 
   // Zobrazení dialogového okna s výpisem zbraní
+  // In shooting_log_screen.dart
   void _showWeaponsDialog() {
     controller?.pauseCamera(); // Pauza kamery při otevření dialogu
 
@@ -464,29 +505,42 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title:
-              Text('Vyberte zbraň pro ${cartridgeData!['cartridge']['name']}'),
+          title: Text(
+              'Vyberte zbraň pro ${cartridgeData?['cartridge']?['name'] ?? 'Neznámý náboj'}'),
           content: userWeapons.isNotEmpty
               ? Column(
                   mainAxisSize: MainAxisSize.min,
-                  children: userWeapons.map((weapon) {
-                    return ListTile(
-                      title: Text(weapon['name']),
-                      subtitle: Text('ID: ${weapon['id']}'),
-                      onTap: () {
-                        Navigator.of(context)
-                            .pop(); // Zavřít dialog po výběru zbraně
-                        _showShootingLogForm(
-                            weapon['id']); // Pokračovat na formulář
-                      },
-                    );
-                  }).toList(),
+                  children: userWeapons
+                      .map((weapon) {
+                        // Add null checks for weapon data
+                        final name = weapon['weapon_name'] ??
+                            weapon['name'] ??
+                            'Neznámá zbraň';
+                        final id = weapon['weapon_id']?.toString() ??
+                            weapon['id']?.toString();
+
+                        if (id == null) {
+                          print('Warning: Weapon without ID: $weapon');
+                          return SizedBox.shrink(); // Skip invalid weapons
+                        }
+
+                        return ListTile(
+                          title: Text(name),
+                          subtitle: Text('ID: $id'),
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            _showShootingLogForm(int.parse(id));
+                          },
+                        );
+                      })
+                      .where((widget) => widget is ListTile)
+                      .toList(), // Filter out null widgets
                 )
               : Text('Žádné zbraně odpovídající kalibru nebyly nalezeny.'),
           actions: <Widget>[
             TextButton(
               onPressed: () {
-                Navigator.of(context).pop(); // Zavřít dialog bez výběru
+                Navigator.of(context).pop();
               },
               child: const Text('Zavřít'),
             ),
@@ -494,7 +548,7 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
         );
       },
     ).then((_) {
-      controller?.resumeCamera(); // Obnovení kamery po zavření dialogu
+      controller?.resumeCamera();
     });
   }
 
@@ -681,44 +735,116 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     int weaponId,
     int shotsFired,
     String activityType,
-    String? rangeName, // Umožni nullable
+    String? rangeName,
     String date,
     String note,
-    Function(String) onErrorCallback, // Callback pro zpracování chyb
+    Function(String) onErrorCallback,
   ) async {
+    final dbHelper = DatabaseHelper();
+
+    final shootingLogData = {
+      "weapon_id": weaponId,
+      "cartridge_id": cartridgeData!['cartridge']['id'],
+      "activity_type": activityType,
+      "range": rangeName,
+      "shots_fired": shotsFired,
+      "date": date,
+      "note": note,
+    };
+
     try {
-      final dynamic idValue = cartridgeData!['cartridge']['id'];
-      final int cartridgeId =
-          idValue is int ? idValue : int.parse(idValue.toString());
+      bool online = await isOnline();
 
-      final response = await ApiService.createShootingLog({
-        "weapon_id": weaponId,
-        "cartridge_id": cartridgeId,
-        "activity_type": activityType,
-        "range": rangeName, // Odeslání null, pokud nebyla vybrána střelnice
-        "shots_fired": shotsFired,
-        "date": date,
-        "note": note,
-      });
-
-      if (response.containsKey('shooting_log_id')) {
-        print(
-            'Záznam ve střeleckém deníku byl úspěšně vytvořen: ID ${response['shooting_log_id']}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}'),
-          ),
-        );
-        Navigator.of(context).pop(); // Zavřít dialog při úspěchu
+      if (online) {
+        try {
+          final response = await ApiService.createShootingLog(shootingLogData);
+          if (response.containsKey('shooting_log_id')) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text(
+                      'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}')),
+            );
+            Navigator.of(context).pop();
+          } else {
+            throw Exception(response['error'] ?? 'Chyba při ukládání.');
+          }
+        } catch (e) {
+          print('API Error: $e');
+          await _saveOfflineShootingLog(shootingLogData, dbHelper);
+        }
       } else {
-        final errorMessage = response['error'] ?? 'Chyba při ukládání.';
-        print('Chyba při vytváření záznamu: $errorMessage');
-        onErrorCallback(errorMessage); // Zpracování chyby
+        await _saveOfflineShootingLog(shootingLogData, dbHelper);
       }
     } catch (e) {
-      print('Chyba při vytváření záznamu ve střeleckém deníku: $e');
-      onErrorCallback('Chyba při vytváření záznamu.'); // Zpracování chyby
+      print('Chyba při vytváření záznamu: $e');
+      onErrorCallback(e.toString());
+    }
+  }
+
+  Future<void> _saveOfflineShootingLog(
+      Map<String, dynamic> data, DatabaseHelper dbHelper) async {
+    try {
+      print('DEBUG: Cartridge ID pro ověření: ${data['cartridge_id']}');
+
+      // Změnit na správnou metodu pro získání náboje podle ID
+      final cartridge =
+          await dbHelper.getDataById('cartridges', data['cartridge_id']);
+      if (cartridge == null) {
+        throw Exception('Chyba: Náboj nebyl nalezen v databázi');
+      }
+
+      final currentStock = cartridge['stock_quantity'] as int;
+      final requestedShots = data['shots_fired'] as int;
+
+      if (requestedShots > currentStock) {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Nedostatek střeliva'),
+              content: Text(
+                  'Nelze zaznamenat $requestedShots výstřelů.\nDostupné množství: $currentStock ks'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+        return;
+      }
+
+      // Save offline request if validation passes
+      await dbHelper.addOfflineRequest(
+        'create_shooting_log',
+        data,
+      );
+
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Záznam uložen offline pro pozdější synchronizaci')),
+      );
+    } catch (e) {
+      // This catch block now only handles real errors like DB access issues
+      print('Chyba při ukládání offline záznamu: $e');
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Chyba'),
+            content: Text(e.toString()),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
     }
   }
 

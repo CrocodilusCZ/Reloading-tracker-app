@@ -113,8 +113,9 @@ class ApiService {
 
     try {
       final dio = await _getDioInstance();
+      dio.options.headers.addAll(
+          {'Authorization': 'Bearer $token', 'Accept': 'application/json'});
 
-      // Remove any /api/ prefix and add it back once
       final cleanEndpoint =
           endpoint.replaceAll('/api/', '/').replaceAll('//', '/');
       final apiEndpoint =
@@ -128,7 +129,6 @@ class ApiService {
       if (endpoint.contains('/cartridges/') && endpoint.endsWith('/targets')) {
         final formData = FormData.fromMap({
           'image': await MultipartFile.fromFile(
-            // Changed from 'photo' to 'image'
             data['photo_path'],
             filename: data['photo_path'].split('/').last,
           ),
@@ -157,7 +157,6 @@ class ApiService {
         return;
       }
 
-      // Standardní požadavky
       if (data.containsKey('quantity')) {
         data['amount'] = data.remove('quantity');
       }
@@ -167,6 +166,10 @@ class ApiService {
       final response = await dio.post(
         '$baseUrl$apiEndpoint',
         data: data,
+        options: Options(
+            validateStatus: (status) => status! < 500,
+            contentType: 'application/json',
+            headers: {'Content-Type': 'application/json'}),
       );
 
       print("Response status: ${response.statusCode}");
@@ -312,12 +315,38 @@ class ApiService {
   // Načtení kalibrů uživatele
   static Future<List<dynamic>> getCalibers() async {
     try {
-      final calibers = await _get('user-calibers'); // Použití metody _get
-      print('Loaded calibers: ${calibers.length}');
-      return calibers as List<dynamic>;
+      // Check connectivity
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final isOnline = connectivityResult != ConnectivityResult.none;
+
+      if (isOnline) {
+        try {
+          final calibers = await _get('user-calibers');
+          print('Loaded calibers from API: ${calibers.length}');
+          return calibers as List<dynamic>;
+        } catch (apiError) {
+          print('API error, falling back to SQLite: $apiError');
+          return _getCalibersFromSQLite();
+        }
+      } else {
+        print('Offline mode - loading calibers from SQLite');
+        return _getCalibersFromSQLite();
+      }
     } catch (e) {
-      print('Chyba při načítání kalibrů: $e');
+      print('Error loading calibers: $e');
       rethrow;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> _getCalibersFromSQLite() async {
+    try {
+      final db = await DatabaseHelper().database;
+      final calibers = await db.query('calibers');
+      print('Loaded ${calibers.length} calibers from SQLite');
+      return calibers;
+    } catch (e) {
+      print('SQLite error: $e');
+      return [];
     }
   }
 
@@ -598,30 +627,67 @@ class ApiService {
   //vytvoření továrního náboje
   static Future<Map<String, dynamic>> createFactoryCartridge(
       Map<String, dynamic> cartridgeData) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? token = prefs.getString('api_token');
+    try {
+      final dbHelper = DatabaseHelper();
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final isOnline = connectivityResult != ConnectivityResult.none;
 
-    if (token == null) {
-      throw Exception('No token found. Please login.');
-    }
+      // Try online first if available
+      if (isOnline) {
+        try {
+          SharedPreferences prefs = await SharedPreferences.getInstance();
+          String? token = prefs.getString('api_token');
 
-    final response = await http.post(
-      Uri.parse('$baseUrl/cartridges/factory'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept':
-            'application/json', // Doplněná hlavička pro očekávání JSON odpovědi
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode(cartridgeData),
-    );
+          if (token == null) {
+            throw Exception('No token found. Please login.');
+          }
 
-    if (response.statusCode == 201 || response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      print('Error: ${response.body}');
-      throw Exception(
-          'Failed to create factory cartridge: ${response.statusCode}');
+          final response = await http.post(
+            Uri.parse('$baseUrl/cartridges/factory'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(cartridgeData),
+          );
+
+          if (response.statusCode == 201 || response.statusCode == 200) {
+            return jsonDecode(response.body);
+          } else {
+            throw Exception(
+                'Failed to create factory cartridge: ${response.statusCode}');
+          }
+        } catch (apiError) {
+          print('API error, saving locally: $apiError');
+        }
+      }
+
+      // Save locally if offline or API failed
+      print('Saving cartridge locally...');
+
+      // Save offline request for later sync
+      await dbHelper.addOfflineRequest(
+        'create_factory_cartridge',
+        cartridgeData,
+      );
+
+      // Insert into local SQLite
+      final localCartridgeData = {
+        ...cartridgeData,
+        'cartridge_type': 'factory',
+      };
+
+      final id = await dbHelper.insertCartridge(localCartridgeData);
+      return {
+        'success': true,
+        'message': 'Cartridge saved locally',
+        'offline': true,
+        'id': id,
+      };
+    } catch (e) {
+      print('Error creating factory cartridge: $e');
+      throw Exception('Failed to save cartridge: $e');
     }
   }
 
@@ -730,27 +796,54 @@ class ApiService {
 // Navýšení skladové zásoby náboje pomocí čárového kódu
   static Future<Map<String, dynamic>> increaseStockByBarcode(
       String barcode, int quantity) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? token = prefs.getString('api_token');
+    try {
+      // 1. Get current data
+      final dbHelper = DatabaseHelper();
+      final cartridge = await dbHelper.getCartridgeByBarcode(barcode);
+      if (cartridge == null) {
+        throw Exception('Náboj nebyl nalezen');
+      }
 
-    if (token == null) {
-      throw Exception('No token found. Please login.');
-    }
+      // 2. Update local DB stock
+      final newStock = (cartridge['stock_quantity'] as int) + quantity;
+      await dbHelper.updateCartridgeStock(cartridge['id'], newStock);
 
-    final response = await http.post(
-      Uri.parse('$baseUrl/cartridges/barcode/$barcode/update-stock'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token', // Přidání tokenu do hlavičky
-      },
-      body: jsonEncode({'amount': quantity}), // Změněno na 'amount'
-    );
+      // 3. Create offline request using new method
+      await dbHelper.addStockUpdateRequest(
+          {'id': cartridge['id'], 'quantity': quantity, 'barcode': barcode});
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(
-          'Failed to increase stock by barcode: ${response.statusCode}');
+      // Trigger sync immediately after offline request creation
+      await dbHelper.syncOfflineRequests();
+
+      // 4. Try immediate sync if online
+      final bool online = await isOnline();
+      if (online) {
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        String? token = prefs.getString('api_token');
+
+        if (token == null) {
+          throw Exception('No token found. Please login.');
+        }
+
+        final response = await http.post(
+          Uri.parse('$baseUrl/cartridges/barcode/$barcode/update-stock'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({'amount': quantity}),
+        );
+
+        if (response.statusCode != 200) {
+          throw Exception(
+              'Failed to increase stock by barcode: ${response.statusCode}');
+        }
+      }
+
+      return {'newStock': newStock};
+    } catch (e) {
+      print('Error increasing stock: $e');
+      rethrow;
     }
   }
 

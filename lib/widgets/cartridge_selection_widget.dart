@@ -106,41 +106,32 @@ class _CartridgeSelectionWidgetState extends State<CartridgeSelectionWidget> {
     try {
       final result = await Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (context) => const QRScanScreen(),
-        ),
+        MaterialPageRoute(builder: (context) => const QRScanScreen()),
       );
 
-      if (result == null) return;
-
-      if (!mounted) return;
+      if (result == null || !mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Vyhledávání náboje...')),
       );
 
-      print('Scan result type: ${result.runtimeType}');
-      print('Scan result value: $result');
-
       final String scannedBarcode = result.toString().trim();
-      if (scannedBarcode.isEmpty) {
-        throw Exception('Prázdný čárový kód');
-      }
+      if (scannedBarcode.isEmpty) throw Exception('Prázdný čárový kód');
 
       final bool isOnline = await ConnectivityHelper().hasInternetConnection();
       print('Connection status: ${isOnline ? "Online" : "Offline"}');
 
-      Map<String, dynamic>? response;
+      Map<String, dynamic>? cartridgeData;
       try {
         if (isOnline) {
           print('Fetching from API: $scannedBarcode');
-          response = await ApiService.checkBarcode(scannedBarcode);
-          print('API response: $response');
+          final apiResponse = await ApiService.checkBarcode(scannedBarcode);
+          cartridgeData = apiResponse['cartridge'];
         } else {
           print('Fetching from local DB: $scannedBarcode');
-          response =
+          cartridgeData =
               await DatabaseHelper().getCartridgeByBarcode(scannedBarcode);
-          print('DB response: $response');
         }
+        print('Response data: $cartridgeData');
       } catch (e) {
         print('Data fetch error: $e');
         throw Exception(isOnline
@@ -148,20 +139,15 @@ class _CartridgeSelectionWidgetState extends State<CartridgeSelectionWidget> {
             : 'Chyba při čtení z databáze');
       }
 
-      if (response == null || !response.containsKey('exists')) {
-        throw Exception(isOnline
-            ? 'Neplatná odpověď z API'
-            : 'Neplatná odpověď z databáze');
-      }
-
-      final cartridge = response['cartridge'];
-      if (cartridge == null) {
+      if (cartridgeData == null) {
         throw Exception('Náboj nebyl nalezen');
       }
 
-      if (!cartridge.containsKey('id') ||
-          !cartridge.containsKey('caliber_id')) {
-        print('Invalid cartridge data: $cartridge');
+      final id = cartridgeData['id']?.toString();
+      final caliberId = cartridgeData['caliber_id']?.toString();
+
+      if (id == null || caliberId == null) {
+        print('Invalid cartridge data: $cartridgeData');
         throw Exception('Neplatná data náboje');
       }
 
@@ -169,14 +155,10 @@ class _CartridgeSelectionWidgetState extends State<CartridgeSelectionWidget> {
       ScaffoldMessenger.of(context).clearSnackBars();
 
       setState(() {
-        selectedCartridgeId =
-            cartridge['id'].toString(); // Update existing state variable
+        selectedCartridgeId = id;
       });
 
-      widget.onCartridgeSelected(
-        cartridge['id'].toString(),
-        cartridge['caliber_id'].toString(),
-      );
+      widget.onCartridgeSelected(id, caliberId);
     } catch (e, stackTrace) {
       print('Error in barcode scanning: $e');
       print('Stack trace: $stackTrace');

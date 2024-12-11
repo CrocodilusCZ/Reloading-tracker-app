@@ -6,14 +6,18 @@ import 'package:flutter/material.dart';
 
 class SyncService {
   final BuildContext context;
+  final VoidCallback onSyncComplete;
 
-  SyncService(this.context);
+  SyncService(this.context, {required this.onSyncComplete});
 
   void handleOnlineStateChange(bool isOnline) {
     if (isOnline) {
       print('Připojení obnoveno, spouštím synchronizaci...');
       syncOfflineRequests().then((_) {
-        print('Synchronizace dokončena');
+        return syncWithApi();
+      }).then((_) {
+        print('Kompletní synchronizace dokončena');
+        onSyncComplete(); // Zavolá _updatePendingRequestsCount v DashboardScreen
       }).catchError((error) {
         print('Chyba při synchronizaci: $error');
       });
@@ -221,6 +225,10 @@ class SyncService {
               '/cartridges/${requestData['cartridge_id']}/targets',
               requestData,
             );
+            break;
+
+          case 'create_factory_cartridge':
+            await ApiService.createFactoryCartridge(requestData);
             break;
 
           default:

@@ -5,6 +5,8 @@ import 'package:shooting_companion/helpers/database_helper.dart';
 import 'package:shooting_companion/screens/cartridge_detail_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shooting_companion/helpers/connectivity_helper.dart';
+import 'package:sqflite/sqflite.dart';
 
 List<Map<String, dynamic>> originalFactoryCartridges = [];
 List<Map<String, dynamic>> originalReloadCartridges = [];
@@ -27,7 +29,9 @@ class FavoriteCartridgesScreen extends StatefulWidget {
 class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
     with SingleTickerProviderStateMixin {
   final PageStorageBucket _bucket = PageStorageBucket();
-
+  final ConnectivityHelper _connectivityHelper = ConnectivityHelper();
+  bool _previousOnlineState = false;
+  int _pendingRequestsCount = 0;
   bool _showFactoryCartridges = true;
   bool _showZeroStock = false;
   String? selectedCaliber;
@@ -43,6 +47,7 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
   void initState() {
     super.initState();
     print("=== Initializing Favorite Cartridges Screen ===");
+    _updatePendingRequestsCount();
 
     // Initialize data
     originalFactoryCartridges =
@@ -157,6 +162,19 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
       });
     });
     _isManualToggle = false;
+  }
+
+  Future<void> _updatePendingRequestsCount() async {
+    final db = await DatabaseHelper().database;
+    final count = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM offline_requests WHERE status = ?',
+      ['pending'],
+    ));
+    if (mounted) {
+      setState(() {
+        _pendingRequestsCount = count ?? 0;
+      });
+    }
   }
 
   Future<void> _loadZeroStockPreference() async {
@@ -563,7 +581,6 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
         );
       } else {
         await DatabaseHelper().addOfflineRequest(
-          context,
           'create_factory_cartridge',
           factoryCartridgeData,
         );
@@ -589,6 +606,50 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
         title: const Text('Inventář nábojů'),
         backgroundColor: Colors.blueGrey,
         elevation: 0,
+        actions: [
+          StreamBuilder<bool>(
+            stream: _connectivityHelper.onConnectionChange,
+            builder: (context, snapshot) {
+              final isOnline = snapshot.data ?? false;
+              _previousOnlineState = isOnline;
+
+              return Padding(
+                padding: const EdgeInsets.only(right: 16.0),
+                child: Stack(
+                  children: [
+                    Tooltip(
+                      message: isOnline ? 'Online' : 'Offline',
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: Icon(
+                          isOnline ? Icons.cloud_done : Icons.cloud_off,
+                          key: ValueKey(isOnline),
+                          color: isOnline
+                              ? Colors.lightBlueAccent
+                              : Colors.grey.shade500,
+                          size: 28,
+                        ),
+                      ),
+                    ),
+                    if (_pendingRequestsCount > 0)
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        child: Text(
+                          '$_pendingRequestsCount',
+                          style: const TextStyle(
+                            color: Colors.orange,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _refreshCartridges,
@@ -626,8 +687,13 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
       floatingActionButton: _showFactoryCartridges
           ? FloatingActionButton(
               onPressed: () => _showAddFactoryCartridgeDialog(),
-              child: const Icon(Icons.add),
+              child: const Icon(Icons.add, color: Colors.white),
               tooltip: 'Přidat tovární náboj',
+              backgroundColor: Colors.blueGrey,
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
             )
           : null,
     );

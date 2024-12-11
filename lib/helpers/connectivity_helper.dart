@@ -101,9 +101,49 @@ class ConnectivityHelper {
   static void showNoInternetSnackBar(BuildContext context) {
     SchedulerBinding.instance.addPostFrameCallback((_) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Není k dispozici připojení k internetu'),
-          duration: Duration(seconds: 3),
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(
+                Icons.wifi_off,
+                color: Colors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Není k dispozici připojení',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Data se ukládají offline a budou automaticky synchronizována po obnovení připojení',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 5),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          margin: const EdgeInsets.all(8),
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: Colors.lightBlueAccent,
+            onPressed: () {
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            },
+          ),
         ),
       );
     });

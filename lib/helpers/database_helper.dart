@@ -12,10 +12,13 @@ import 'package:shooting_companion/database/database_schema.dart';
 import 'package:shooting_companion/models/cartridge.dart';
 import 'package:shooting_companion/models/target_photo_request.dart';
 
+typedef OnOfflineRequestCallback = void Function();
+
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
   factory DatabaseHelper() => _instance;
   static Database? _database;
+  OnOfflineRequestCallback? _onOfflineRequestAdded;
 
   DatabaseHelper._internal();
 
@@ -115,9 +118,75 @@ class DatabaseHelper {
     }
   }
 
+  // In database_helper.dart
+  Future<int> insertCartridge(Map<String, dynamic> cartridgeData) async {
+    try {
+      final db = await database;
+      print('Inserting cartridge data: $cartridgeData');
+
+      // Validate required fields
+      if (cartridgeData['name'] == null ||
+          cartridgeData['caliber_id'] == null) {
+        throw Exception('Missing required fields: name or caliber_id');
+      }
+
+      // Get caliber name
+      final caliber = await db.query('calibers',
+          columns: ['name'],
+          where: 'id = ?',
+          whereArgs: [cartridgeData['caliber_id']]);
+
+      if (caliber.isEmpty) {
+        throw Exception(
+            'Caliber not found for id: ${cartridgeData['caliber_id']}');
+      }
+
+      // Prepare data for insertion
+      final cartridgeToInsert = {
+        'name': cartridgeData['name'],
+        'caliber_id': cartridgeData['caliber_id'],
+        'caliber_name': caliber.first['name'], // Add caliber name
+        'cartridge_type': cartridgeData['cartridge_type'] ?? 'factory',
+        'stock_quantity': cartridgeData['stock_quantity'] ?? 0,
+        'price': cartridgeData['price'] ?? 0.0,
+        'manufacturer': cartridgeData['manufacturer'],
+        'bullet_specification': cartridgeData['bullet_specification'],
+        'barcode': cartridgeData['barcode'],
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      print('Prepared insert data: $cartridgeToInsert');
+
+      final id = await db.insert(
+        'cartridges',
+        cartridgeToInsert,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      print('Cartridge inserted successfully with ID: $id');
+      return id;
+    } catch (e, stackTrace) {
+      print('Error inserting cartridge: $e');
+      print('Stack trace: $stackTrace');
+      throw Exception('Failed to insert cartridge: $e');
+    }
+  }
+
   Future<int> insertOfflineRequest(Map<String, dynamic> request) async {
     final db = await database;
-    return await db.insert('offline_requests', request);
+    final id = await db.insert('offline_requests', request);
+
+    // Notify listeners about new offline request
+    if (_onOfflineRequestAdded != null) {
+      _onOfflineRequestAdded!();
+    }
+
+    return id;
+  }
+
+  void setOnOfflineRequestAddedCallback(OnOfflineRequestCallback callback) {
+    _onOfflineRequestAdded = callback;
   }
 
   Future<Database> get database async {
@@ -129,6 +198,21 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getRanges() async {
     final db = await database;
     return await db.query('ranges');
+  }
+
+  Future<String> getDatabasePath() async {
+    final databasesPath = await getDatabasesPath();
+    final dbPath = path.join(databasesPath, 'shooting_companion.db');
+
+    // Debug info
+    print('Database path: $dbPath');
+    final file = File(dbPath);
+    print('File exists: ${await file.exists()}');
+    if (await file.exists()) {
+      print('File stats: ${await file.stat()}');
+    }
+
+    return dbPath;
   }
 
   Future<void> saveRanges(List<Map<String, dynamic>> ranges) async {
@@ -160,30 +244,39 @@ class DatabaseHelper {
 
   Future<Map<String, dynamic>?> getCartridgeByBarcode(String barcode) async {
     final db = await database;
-    final List<Map<String, dynamic>> result = await db.query(
-      'cartridges',
-      where: 'barcode = ?',
-      whereArgs: [barcode],
-      limit: 1,
-    );
 
-    if (result.isEmpty) {
-      return null;
+    try {
+      // Wrap in transaction to ensure consistent read
+      return await db.transaction((txn) async {
+        print('Starting barcode query transaction for: $barcode');
+
+        final List<Map<String, dynamic>> result = await txn.rawQuery('''
+        SELECT 
+          c.*,
+          cal.id as caliber_id,
+          cal.name as caliber_name
+        FROM cartridges c
+        LEFT JOIN calibers cal ON c.caliber_id = cal.id
+        WHERE c.barcode = ?
+      ''', [barcode]);
+
+        print('Query result: $result');
+
+        if (result.isEmpty) {
+          return null;
+        }
+
+        return result.first;
+      });
+    } catch (e) {
+      print('Transaction error in getCartridgeByBarcode: $e');
+      rethrow;
     }
+  }
 
-    // Přidat informace o kalibru
-    final caliber = await db.query(
-      'calibers',
-      where: 'id = ?',
-      whereArgs: [result.first['caliber_id']],
-      limit: 1,
-    );
-
-    if (caliber.isNotEmpty) {
-      result.first['caliber'] = caliber.first;
-    }
-
-    return result.first;
+  Future<List<Map<String, dynamic>>> getActivities() async {
+    final db = await database;
+    return await db.query('activities');
   }
 
   Future<void> saveWeapons(List<Map<String, dynamic>> weapons) async {
@@ -287,6 +380,12 @@ class DatabaseHelper {
           'status': 'pending',
         },
       );
+
+      // Add callback notification
+      if (_onOfflineRequestAdded != null) {
+        _onOfflineRequestAdded!();
+      }
+
       print("Zásoba cartridge ID $cartridgeId aktualizována na $newStock.");
     } else {
       print("Cartridge ID $cartridgeId nebyla nalezena.");
@@ -323,7 +422,6 @@ class DatabaseHelper {
   }
 
   Future<void> addOfflineRequest(
-    BuildContext context,
     String requestType,
     Map<String, dynamic> requestData,
   ) async {
@@ -334,24 +432,54 @@ class DatabaseHelper {
         'offline_requests',
         {
           'request_type': requestType,
-          'data':
-              jsonEncode(requestData), // Použití jsonEncode pro správný JSON
+          'data': jsonEncode(requestData),
           'status': 'pending',
         },
       );
       print('Požadavek typu $requestType byl přidán do offline_requests.');
 
-      // Zavření dialogu (pokud je potřeba)
-      Navigator.pop(context);
+      // Add callback notification
+      if (_onOfflineRequestAdded != null) {
+        _onOfflineRequestAdded!();
+      }
     } catch (e) {
       print('Chyba při přidávání offline požadavku: $e');
+      throw e;
     }
   }
 
-  Future<void> syncOfflineRequests(BuildContext context) async {
+  Future<bool> addStockUpdateRequest(
+    Map<String, dynamic> requestData,
+  ) async {
     final db = await database;
 
-    // Načtení všech čekajících požadavků
+    try {
+      await db.insert(
+        'offline_requests',
+        {
+          'request_type': 'update_stock',
+          'data': jsonEncode(requestData),
+          'status': 'pending',
+        },
+      );
+      print('Stock update request added to offline_requests');
+
+      // Add callback notification
+      if (_onOfflineRequestAdded != null) {
+        _onOfflineRequestAdded!();
+      }
+
+      return true;
+    } catch (e) {
+      print('Error adding stock update request: $e');
+      return false;
+    }
+  }
+
+  // In database_helper.dart
+  Future<void> syncOfflineRequests() async {
+    final db = await database;
+
     final requests = await db.query(
       'offline_requests',
       where: 'status = ?',
@@ -365,70 +493,28 @@ class DatabaseHelper {
       final rawData = request['data'];
 
       try {
-        // Kontrola, zda je rawData typu String
         if (rawData is String) {
-          final requestData = jsonDecode(rawData); // Dekódování JSON
+          final requestData = jsonDecode(rawData);
 
           switch (requestType) {
             case 'update_stock':
-              // API volání pro synchronizaci zásoby
               await ApiService.syncRequest(
-                '/cartridges/${requestData['id']}/update-stock',
-                {'quantity': requestData['quantity']},
-              );
-
-              // Zobrazení úspěšného snackbaru
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    "Synchronizace úspěšná: Náboj ID ${requestData['id']} "
-                    "navýšen o ${requestData['quantity']}.",
-                  ),
-                  backgroundColor: Colors.green,
-                  duration: Duration(seconds: 3),
-                ),
-              );
+                  '/cartridges/${requestData['id']}/update-stock',
+                  {'quantity': requestData['quantity']});
               break;
 
             case 'create_activity':
               await ApiService.syncRequest('/activities', requestData);
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text("Aktivita úspěšně synchronizována."),
-                  backgroundColor: Colors.green,
-                  duration: Duration(seconds: 3),
-                ),
-              );
               break;
 
             case 'delete_activity':
               await ApiService.syncRequest(
-                '/activities/${requestData['id']}/delete',
-                {},
-              );
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content:
-                      Text("Aktivita ID ${requestData['id']} byla smazána."),
-                  backgroundColor: Colors.green,
-                  duration: Duration(seconds: 3),
-                ),
-              );
+                  '/activities/${requestData['id']}/delete', {});
               break;
 
             case 'create_shooting_log':
               print("Synchronizuji střelecký záznam: $requestData");
-              await ApiService.syncRequest('/shooting_logs', requestData);
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text("Střelecký záznam úspěšně synchronizován."),
-                  backgroundColor: Colors.green,
-                  duration: Duration(seconds: 3),
-                ),
-              );
+              await ApiService.syncRequest('/shooting-logs', requestData);
               break;
 
             default:
@@ -436,7 +522,6 @@ class DatabaseHelper {
               continue;
           }
 
-          // Aktualizace statusu na "completed"
           await db.update(
             'offline_requests',
             {'status': 'completed'},
@@ -444,38 +529,39 @@ class DatabaseHelper {
             whereArgs: [request['id']],
           );
           print("Požadavek ID ${request['id']} synchronizován úspěšně.");
-        } else {
-          // Pokud rawData není typu String
-          print("Neplatná data pro požadavek ID ${request['id']}: $rawData");
-          await db.update(
-            'offline_requests',
-            {'status': 'failed'},
-            where: 'id = ?',
-            whereArgs: [request['id']],
-          );
         }
       } catch (e) {
         print("Chyba při synchronizaci požadavku ID ${request['id']}: $e");
-
-        // Aktualizace statusu na "failed"
         await db.update(
           'offline_requests',
           {'status': 'failed'},
           where: 'id = ?',
           whereArgs: [request['id']],
         );
-
-        // Zobrazení chybového snackbaru
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              "Chyba při synchronizaci požadavku ID ${request['id']}: $e",
-            ),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
-          ),
-        );
       }
+    }
+  }
+
+  Future<void> updateCartridgeStock(int cartridgeId, int newStock) async {
+    final db = await database;
+    try {
+      await db.transaction((txn) async {
+        final result = await txn.update(
+          'cartridges',
+          {'stock_quantity': newStock},
+          where: 'id = ?',
+          whereArgs: [cartridgeId],
+        );
+
+        if (result != 1) {
+          throw Exception('Náboj s ID $cartridgeId nebyl nalezen');
+        }
+
+        print('Aktualizován stock pro cartridge_id: $cartridgeId na $newStock');
+      });
+    } catch (e) {
+      print('Chyba při aktualizaci skladové zásoby: $e');
+      rethrow;
     }
   }
 

@@ -33,7 +33,7 @@ class DashboardScreen extends StatefulWidget {
   final String username;
 
   const DashboardScreen({super.key, required this.username});
-  static const String currentVersion = "1.0.6"; // Aktuální verze aplikace
+  static const String currentVersion = "1.0.7"; // Aktuální verze aplikace
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
@@ -49,15 +49,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late StreamSubscription<ConnectivityResult> _connectivitySubscription;
   late ConnectivityMonitor _connectivityMonitor;
   late SyncService _syncService;
+  bool _previousOnlineState = false;
+  int _pendingRequestsCount = 0;
 
   @override
   void initState() {
     super.initState();
     _checkVersion();
     username = widget.username;
+    _updatePendingRequestsCount();
+    DatabaseHelper()
+        .setOnOfflineRequestAddedCallback(_updatePendingRequestsCount);
 
     // Nejdřív inicializujeme SyncService
-    _syncService = SyncService(context);
+    _syncService = SyncService(
+      context,
+      onSyncComplete: _updatePendingRequestsCount,
+    );
 
     // Registrujeme SyncService do ConnectivityHelper
     _connectivityHelper.registerSyncService(_syncService);
@@ -126,6 +134,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'reload': <Map<String, dynamic>>[],
       };
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _updatePendingRequestsCount(); // Aktualizace při návratu na obrazovku
+  }
+
+  Future<void> _updatePendingRequestsCount() async {
+    print('Aktualizuji počet pending requestů...');
+    final db = await DatabaseHelper().database;
+    final count = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT COUNT(*) FROM offline_requests WHERE status = ?',
+      ['pending'],
+    ));
+    print('Nalezeno ${count ?? 0} pending requestů');
+
+    if (mounted) {
+      setState(() {
+        _pendingRequestsCount = count ?? 0;
+        print('Aktualizován stav: $_pendingRequestsCount pending requestů');
+      });
+    }
   }
 
   Future<void> _checkVersion() async {
@@ -456,21 +487,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
             stream: _connectivityHelper.onConnectionChange,
             builder: (context, snapshot) {
               final isOnline = snapshot.data ?? false;
+              _previousOnlineState = isOnline;
+
               return Padding(
                 padding: const EdgeInsets.only(right: 16.0),
-                child: Tooltip(
-                  message: isOnline ? 'Online' : 'Offline',
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: Icon(
-                      isOnline ? Icons.cloud_done : Icons.cloud_off,
-                      key: ValueKey(isOnline),
-                      color: isOnline
-                          ? Colors.lightBlueAccent
-                          : Colors.grey.shade500,
-                      size: 28,
+                child: Stack(
+                  children: [
+                    Tooltip(
+                      message: isOnline ? 'Online' : 'Offline',
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: Icon(
+                          isOnline ? Icons.cloud_done : Icons.cloud_off,
+                          key: ValueKey(isOnline),
+                          color: isOnline
+                              ? Colors.lightBlueAccent
+                              : Colors.grey.shade500,
+                          size: 28,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (_pendingRequestsCount > 0)
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        child: Text(
+                          '$_pendingRequestsCount',
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               );
             },

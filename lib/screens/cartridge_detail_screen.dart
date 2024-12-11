@@ -106,6 +106,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
   List<dynamic> userWeapons = [];
   List<dynamic> userActivities = [];
   bool isLoading = false;
+  List<dynamic> userRanges = [];
 
   @override
   void initState() {
@@ -175,6 +176,17 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
       print(
           '\n⏱️ Doba zpracování: ${endTime.difference(startTime).inMilliseconds}ms');
       print('✅ [Session: $sessionId] === NAČÍTÁNÍ DOKONČENO ===\n');
+    }
+  }
+
+  Future<void> _fetchUserRanges() async {
+    try {
+      final rangesResponse = await ApiService.getUserRanges();
+      setState(() {
+        userRanges = rangesResponse ?? [];
+      });
+    } catch (e) {
+      print('Chyba při načítání střelnic: $e');
     }
   }
 
@@ -650,7 +662,6 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
   }
 
   Future<void> _showShootingLogForm(BuildContext context) async {
-    // Debug - zkontroluj obsah userWeapons
     print('Načtené zbraně: $userWeapons');
     if (userWeapons.isEmpty) {
       scaffoldMessengerKey.currentState?.showSnackBar(
@@ -658,8 +669,10 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
           content: Text('Žádné zbraně nebyly nalezeny pro tento kalibr.'),
         ),
       );
-      return; // Ukončí funkci, pokud není žádná zbraň dostupná
+      return;
     }
+
+    await _fetchUserRanges();
 
     TextEditingController ammoCountController = TextEditingController();
     TextEditingController noteController = TextEditingController();
@@ -667,6 +680,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
       text: DateTime.now().toIso8601String().substring(0, 10),
     );
     String? selectedWeapon;
+    String? selectedRange;
 
     await showDialog(
       context: context,
@@ -692,7 +706,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                             child: Text(weapon['weapon_name']),
                           );
                         }
-                        return DropdownMenuItem<String>(
+                        return const DropdownMenuItem<String>(
                           value: '',
                           child: Text('Není k dispozici'),
                         );
@@ -709,6 +723,27 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                         labelText: 'Počet vystřelených nábojů',
                       ),
                       keyboardType: TextInputType.number,
+                    ),
+                    DropdownButtonFormField<String>(
+                      decoration: const InputDecoration(labelText: 'Střelnice'),
+                      value: selectedRange,
+                      items: [
+                        const DropdownMenuItem<String>(
+                          value: null,
+                          child: Text('Bez střelnice'),
+                        ),
+                        ...userRanges.map<DropdownMenuItem<String>>((range) {
+                          return DropdownMenuItem<String>(
+                            value: range['name'],
+                            child: Text(range['name']),
+                          );
+                        }).toList(),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          selectedRange = value;
+                        });
+                      },
                     ),
                     TextField(
                       controller: dateController,
@@ -746,49 +781,43 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                       'weapon_id': int.parse(selectedWeapon!),
                       'activity_type': 'Střelba',
                       'date': dateController.text,
-                      'range': null,
+                      'range': selectedRange,
                       'shots_fired':
                           int.tryParse(ammoCountController.text) ?? 0,
-                      'cartridge_id': widget.cartridge[
-                          'id'], // Change from caliber_id to cartridge_id
+                      'cartridge_id': widget.cartridge['id'],
                       'note': noteController.text,
                     };
+
+                    Navigator.pop(context);
 
                     bool online = await isOnline();
                     if (online) {
                       try {
-                        // Pokus o odeslání dat na API
                         final response =
                             await ApiService.createShootingLog(shootingLogData);
 
                         if (response != null && response['success'] == true) {
                           print('Záznam úspěšně vytvořen: $response');
-
                           scaffoldMessengerKey.currentState?.showSnackBar(
                             const SnackBar(
                               content: Text(
                                   'Záznam byl úspěšně uložen do střeleckého deníku.'),
                             ),
                           );
-                          Navigator.pop(context); // Zavření dialogu
                         } else {
-                          // Pokud API vrátí neúspěch
                           throw Exception('API nevrátilo úspěšnou odpověď.');
                         }
                       } catch (e) {
                         print('Chyba při odesílání záznamu: $e');
 
-                        // Offline režim: Ulož požadavek lokálně
                         try {
                           await DatabaseHelper().addOfflineRequest(
-                            context, // Kontext, pokud je třeba
-                            'create_shooting_log', // Typ požadavku
-                            shootingLogData, // Data požadavku
+                            'create_shooting_log',
+                            shootingLogData,
                           );
                           print(
                               'Požadavek byl úspěšně uložen do offline_requests.');
 
-                          // Přidání Snackbaru pro uživatele
                           scaffoldMessengerKey.currentState?.showSnackBar(
                             const SnackBar(
                               content: Text(
@@ -800,18 +829,29 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                         }
                       }
                     } else {
-                      // Offline režim: Ulož požadavek lokálně
                       print('Offline režim: Ukládám požadavek lokálně.');
                       try {
                         await DatabaseHelper().addOfflineRequest(
-                          context, // Kontext, pokud je třeba
-                          'create_shooting_log', // Typ požadavku
-                          shootingLogData, // Data požadavku
+                          'create_shooting_log',
+                          shootingLogData,
                         );
                         print(
                             'Požadavek byl úspěšně uložen do offline_requests.');
+
+                        scaffoldMessengerKey.currentState?.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'Záznam byl uložen pro pozdější synchronizaci.'),
+                          ),
+                        );
                       } catch (error) {
                         print('Chyba při ukládání požadavku offline: $error');
+                        scaffoldMessengerKey.currentState?.showSnackBar(
+                          const SnackBar(
+                            content:
+                                Text('Chyba při ukládání záznamu offline.'),
+                          ),
+                        );
                       }
                     }
                   },
