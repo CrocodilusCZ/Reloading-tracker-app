@@ -1146,20 +1146,20 @@ class DatabaseHelper {
 
   Future<void> cacheCartridges(List<Map<String, dynamic>> cartridges) async {
     final db = await database;
-    final batch = db.batch();
 
     try {
-      // Clear existing cache
-      await db.delete('cartridges');
+      await db.transaction((txn) async {
+        // Instead of deleting all, update existing and insert new
+        for (var cartridge in cartridges) {
+          await txn.insert('cartridges', cartridge,
+              conflictAlgorithm: ConflictAlgorithm.replace // Update if exists
+              );
+        }
+      });
 
-      // Insert new data
-      for (var cartridge in cartridges) {
-        await db.insert('cartridges', cartridge);
-      }
-
-      print('Uloženo ${cartridges.length} nábojů do lokální DB.');
+      print('Synchronized ${cartridges.length} cartridges in local DB');
     } catch (e) {
-      print('Chyba při ukládání nábojů do DB: $e');
+      print('Error syncing cartridges to DB: $e');
     }
   }
 

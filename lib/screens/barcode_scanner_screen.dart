@@ -28,6 +28,15 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   bool isFlashOn = false; // Výchozí stav svítilny
 
   @override
+  void initState() {
+    super.initState();
+    // Zajistí, že při otevření obrazovky bude skener resetován
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _resetScanner();
+    });
+  }
+
+  @override
   void dispose() {
     controller?.dispose();
     super.dispose();

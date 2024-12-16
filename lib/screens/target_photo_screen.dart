@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+//import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:path/path.dart' as path;
@@ -32,23 +32,13 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
   MoaMeasurementData? _moaMeasurementData;
 
   Future<void> _takePhoto() async {
-    final ImagePicker picker = ImagePicker();
-    // Add imageQuality parameter to reduce file size
-    final XFile? photo = await picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 100, // Reduces image quality to 50%
-        maxWidth: 1920, // Limits max width
-        maxHeight: 1080 // Limits max height
-        );
-
-    if (photo != null) {
-      setState(() {
-        targetImage = File(photo.path);
-      });
-
-      // Log compressed file size
-      print('Compressed image size: ${await targetImage!.length()} bytes');
-    }
+    // Simulace výběru fotky - použijeme dummy file
+    final dummyPath =
+        'assets/test_target.jpg'; // nebo jiná testovací fotka v assets
+    setState(() {
+      targetImage = File(dummyPath);
+    });
+    print('Test photo selected');
   }
 
   Future<void> _submitData() async {
@@ -213,6 +203,13 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
     }
   }
 
+  Future<void> _pickFromGallery() async {
+    setState(() {
+      targetImage = File('assets/test_target.jpg');
+    });
+    print('Test gallery photo selected');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -311,20 +308,57 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
                   if (targetImage != null)
                     Image.file(targetImage!, height: 200)
                   else
-                    ElevatedButton(
-                      onPressed: _takePhoto,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueGrey,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 12),
-                      ),
-                      child: const Text(
-                        'Vyfotit terč',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: _takePhoto,
+                          icon: Icon(Icons.camera_alt, color: Colors.white),
+                          label: Text(
+                            'Vyfotit',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blueGrey,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 16,
+                            ),
+                            elevation: 3,
+                          ),
                         ),
+                        ElevatedButton.icon(
+                          onPressed: _pickFromGallery,
+                          icon: Icon(Icons.photo_library, color: Colors.white),
+                          label: Text(
+                            'Vybrat',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blueGrey,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 16,
+                            ),
+                            elevation: 3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  if (targetImage != null)
+                    Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: TextButton(
+                        onPressed: () => setState(() => targetImage = null),
+                        child: Text('Zrušit výběr'),
                       ),
                     ),
                 ],

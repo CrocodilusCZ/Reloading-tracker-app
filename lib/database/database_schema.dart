@@ -74,6 +74,7 @@ class DatabaseSchema {
        is_favorite INTEGER DEFAULT 0,
        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+       load_step_id INTEGER,
        FOREIGN KEY (caliber_id) REFERENCES calibers (id)
       )''');
       print("Tabulka cartridges vytvořena.");

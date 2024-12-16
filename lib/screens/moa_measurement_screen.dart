@@ -289,6 +289,14 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
   bool _showGroupStats = true;
   final GlobalKey _imageKey = GlobalKey();
 
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    calibrationController.dispose();
+    distanceController.dispose();
+    super.dispose();
+  }
+
   void _handleZoomIn() {
     final double currentScale =
         _transformationController.value.getMaxScaleOnAxis();
