@@ -685,15 +685,26 @@ class _FavoriteCartridgesScreenState extends State<FavoriteCartridgesScreen>
         ),
       ),
       floatingActionButton: _showFactoryCartridges
-          ? FloatingActionButton(
-              onPressed: () => _showAddFactoryCartridgeDialog(),
-              child: const Icon(Icons.add, color: Colors.white),
-              tooltip: 'Přidat tovární náboj',
-              backgroundColor: Colors.blueGrey,
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
+          ? StreamBuilder<bool>(
+              stream: _connectivityHelper.onConnectionChange,
+              builder: (context, snapshot) {
+                final isOnline = snapshot.data ?? false;
+
+                return FloatingActionButton(
+                  onPressed: isOnline
+                      ? () => _showAddFactoryCartridgeDialog()
+                      : null, // Disabled when offline
+                  child: const Icon(Icons.add, color: Colors.white),
+                  tooltip: isOnline
+                      ? 'Přidat tovární náboj'
+                      : 'Přidání náboje není v offline režimu dostupné',
+                  backgroundColor: isOnline ? Colors.blueGrey : Colors.grey,
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                );
+              },
             )
           : null,
     );

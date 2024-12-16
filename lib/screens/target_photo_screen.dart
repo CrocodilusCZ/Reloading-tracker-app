@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shooting_companion/helpers/connectivity_helper.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
 import 'package:shooting_companion/models/target_photo_request.dart';
+import 'package:shooting_companion/screens/moa_measurement_screen.dart';
 
 class TargetPhotoScreen extends StatefulWidget {
   @override
@@ -26,6 +27,9 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
   final TextEditingController distanceController = TextEditingController();
   final TextEditingController notesController = TextEditingController();
   final ConnectivityHelper _connectivityHelper = ConnectivityHelper();
+  double? _moaValue;
+  int? _shotCount;
+  MoaMeasurementData? _moaMeasurementData;
 
   Future<void> _takePhoto() async {
     final ImagePicker picker = ImagePicker();
@@ -79,36 +83,47 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
       print('DEBUG: Internet connection status: $hasInternet');
 
       if (!hasInternet) {
-        // Debug print to verify data
         print('DEBUG: Saving offline request with photoId: $photoId');
 
-        // 1. Uložení požadavku do offline_requests
+        // Prepare request data including MOA if available
+        var requestJsonData = {
+          'photo_id': photoId,
+          'photo_path': targetImage!.path,
+          'notes': notesController.text,
+          'distance': distanceController.text,
+          'weapon_id': selectedWeaponId,
+          'cartridge_id': selectedCartridgeId,
+        };
+
+        // Add complete MOA measurement data if available
+        if (_moaMeasurementData != null) {
+          requestJsonData['moa_data'] = _moaMeasurementData!.toJson();
+        } else if (_moaValue != null) {
+          // Fallback to simple MOA value
+          requestJsonData['moa_value'] = _moaValue;
+          requestJsonData['shot_count'] = _shotCount;
+        }
+
+        // Create final request structure
         final requestData = {
           'request_type': 'upload_target_photo',
-          'data': jsonEncode({
-            'photo_id': photoId,
-            'photo_path': targetImage!.path,
-            'notes': notesController.text,
-            'distance': distanceController.text,
-            'weapon_id': selectedWeaponId,
-            'cartridge_id': selectedCartridgeId,
-          }),
+          'data': jsonEncode(requestJsonData),
           'status': 'pending',
         };
 
         print('DEBUG: Request data: $requestData');
 
+        // Save to database
         await dbHelper.insertOfflineRequest(requestData);
-
-        // Debug print to confirm insertion
         print('DEBUG: Offline request saved successfully');
 
-        // 2. Navigace a zobrazení zprávy uživateli
+        // Navigate back and show confirmation
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  'Terč byl uložen lokálně a bude synchronizován později')),
+          const SnackBar(
+            content:
+                Text('Terč byl uložen lokálně a bude synchronizován později'),
+          ),
         );
         return;
       }
@@ -133,9 +148,16 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
             {'Authorization': 'Bearer $token', 'Accept': 'application/json'});
 
         // Přidání souboru s fotkou
-        request.files.add(
-          await http.MultipartFile.fromPath('image', targetImage!.path),
-        );
+        if (_moaMeasurementData != null) {
+          request.files.add(
+            await http.MultipartFile.fromPath(
+                'image', _moaMeasurementData!.originalImagePath),
+          );
+        } else {
+          request.files.add(
+            await http.MultipartFile.fromPath('image', targetImage!.path),
+          );
+        }
 
         // Přidání volitelných polí
         if (distanceController.text.isNotEmpty) {
@@ -146,6 +168,13 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
         }
         if (selectedWeaponId != null) {
           request.fields['weapon_id'] = selectedWeaponId!;
+        }
+        if (_moaMeasurementData != null) {
+          request.fields['moa_data'] =
+              jsonEncode(_moaMeasurementData!.toJson());
+        } else if (_moaValue != null) {
+          request.fields['moa_value'] = _moaValue.toString();
+          request.fields['shot_count'] = _shotCount.toString();
         }
 
         // Odeslání požadavku
@@ -301,6 +330,73 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
                 ],
               ),
               isActive: _currentStep >= 2,
+            ),
+            Step(
+              title: Text('MOA Měření'),
+              content: Column(
+                children: [
+                  if (targetImage != null)
+                    ElevatedButton(
+                      onPressed: () async {
+                        final MoaMeasurementData? result = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => MoaMeasurementScreen(
+                              imageFile: targetImage!,
+                            ),
+                          ),
+                        );
+
+                        if (result != null) {
+                          setState(() {
+                            _moaMeasurementData = result;
+                            // Keep simple values for compatibility
+                            if (result.groups.isNotEmpty) {
+                              _moaValue = result.groups[0].moaValue;
+                              _shotCount = result.groups[0].points.length;
+                            }
+                          });
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueGrey,
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      ),
+                      child: Text(
+                        'Měřit MOA',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  if (_moaMeasurementData != null) ...[
+                    SizedBox(height: 16),
+                    ...(_moaMeasurementData!.groups
+                        .asMap()
+                        .entries
+                        .map((entry) {
+                      final index = entry.key;
+                      final group = entry.value;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Skupina ${index + 1}: ${group.moaValue.toStringAsFixed(2)} MOA',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          Text('Počet zásahů: ${group.points.length}'),
+                          SizedBox(height: 8),
+                        ],
+                      );
+                    })),
+                  ],
+                ],
+              ),
+              isActive: _currentStep >= 3,
             ),
             Step(
               title: Text('Doplňující údaje'),
