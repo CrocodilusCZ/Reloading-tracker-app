@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-//import 'package:image_picker/image_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:path/path.dart' as path;
@@ -12,8 +12,18 @@ import 'package:shooting_companion/helpers/connectivity_helper.dart';
 import 'package:shooting_companion/helpers/database_helper.dart';
 import 'package:shooting_companion/models/target_photo_request.dart';
 import 'package:shooting_companion/screens/moa_measurement_screen.dart';
+import 'dart:math' show pi;
+import 'dart:ui' as ui;
+import 'package:path_provider/path_provider.dart';
 
 class TargetPhotoScreen extends StatefulWidget {
+  final Function()? onTargetAdded;
+
+  const TargetPhotoScreen({
+    Key? key,
+    this.onTargetAdded,
+  }) : super(key: key);
+
   @override
   _TargetPhotoScreenState createState() => _TargetPhotoScreenState();
 }
@@ -23,6 +33,8 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
   String? selectedCartridgeId;
   String? selectedCaliberId;
   String? selectedWeaponId;
+  String? selectedCartridgeName;
+  String? selectedWeaponName;
   File? targetImage;
   final TextEditingController distanceController = TextEditingController();
   final TextEditingController notesController = TextEditingController();
@@ -30,15 +42,26 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
   double? _moaValue;
   int? _shotCount;
   MoaMeasurementData? _moaMeasurementData;
+  double _imageRotation = 0;
 
   Future<void> _takePhoto() async {
-    // Simulace výběru fotky - použijeme dummy file
-    final dummyPath =
-        'assets/test_target.jpg'; // nebo jiná testovací fotka v assets
-    setState(() {
-      targetImage = File(dummyPath);
-    });
-    print('Test photo selected');
+    final ImagePicker picker = ImagePicker();
+    // Add imageQuality parameter to reduce file size
+    final XFile? photo = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 100, // Reduces image quality to 50%
+        maxWidth: 1920, // Limits max width
+        maxHeight: 1080 // Limits max height
+        );
+
+    if (photo != null) {
+      setState(() {
+        targetImage = File(photo.path);
+      });
+
+      // Log compressed file size
+      print('Compressed image size: ${await targetImage!.length()} bytes');
+    }
   }
 
   Future<void> _submitData() async {
@@ -51,63 +74,89 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
     }
 
     try {
-      // 2. Vytvoření požadavku na fotku
+      // Get rotated image first
+      final File rotatedImage = await _saveRotatedImage();
+
+      // 2. Vytvoření požadavku a lokální uložení
       final photo = TargetPhotoRequest(
         id: 0,
-        photoPath: targetImage!.path,
+        photoPath: rotatedImage.path,
         note: notesController.text,
         createdAt: DateTime.now(),
         isSynced: false,
         cartridgeId: int.parse(selectedCartridgeId!),
       );
 
-      // 3. Uložení lokálně
       final DatabaseHelper dbHelper = DatabaseHelper();
       final photoId = await dbHelper.insertTargetPhoto(photo);
       print('DEBUG: Photo saved locally with ID: $photoId');
 
-      // 4. Kontrola připojení
+      // 3. Kontrola připojení
       final connectivityHelper = ConnectivityHelper();
       final hasInternet = await connectivityHelper.hasInternetConnection();
       print('DEBUG: Checking actual internet connectivity...');
       print('DEBUG: Internet connection status: $hasInternet');
 
       if (!hasInternet) {
-        print('DEBUG: Saving offline request with photoId: $photoId');
+        String imagePath;
+        if (_moaMeasurementData != null) {
+          // Ensure we use permanent storage
+          final directory = await getApplicationDocumentsDirectory();
+          final fileName =
+              'annotated_${DateTime.now().millisecondsSinceEpoch}.png';
+          final permanentPath = '${directory.path}/$fileName';
 
-        // Prepare request data including MOA if available
+          // Debug logging
+          print(
+              'Copying annotated image from: ${_moaMeasurementData!.originalImagePath}');
+          print('To permanent location: $permanentPath');
+
+          // Check if source exists
+          if (!await File(_moaMeasurementData!.originalImagePath).exists()) {
+            print('ERROR: Source annotated image does not exist!');
+            throw Exception('Annotated image not found');
+          }
+
+          // Copy with verification
+          final File newFile =
+              await File(_moaMeasurementData!.originalImagePath)
+                  .copy(permanentPath);
+
+          if (!await newFile.exists()) {
+            print('ERROR: Failed to copy annotated image!');
+            throw Exception('Failed to save annotated image');
+          }
+
+          imagePath = permanentPath;
+          print('Successfully saved annotated image to permanent storage');
+        } else {
+          imagePath = rotatedImage.path;
+        }
+
         var requestJsonData = {
           'photo_id': photoId,
-          'photo_path': targetImage!.path,
+          'photo_path': imagePath, // Použijeme cestu k anotovanému obrázku
           'notes': notesController.text,
           'distance': distanceController.text,
           'weapon_id': selectedWeaponId,
           'cartridge_id': selectedCartridgeId,
         };
 
-        // Add complete MOA measurement data if available
+        // Zbytek kódu zůstává stejný
         if (_moaMeasurementData != null) {
           requestJsonData['moa_data'] = _moaMeasurementData!.toJson();
         } else if (_moaValue != null) {
-          // Fallback to simple MOA value
           requestJsonData['moa_value'] = _moaValue;
           requestJsonData['shot_count'] = _shotCount;
         }
 
-        // Create final request structure
         final requestData = {
           'request_type': 'upload_target_photo',
           'data': jsonEncode(requestJsonData),
           'status': 'pending',
         };
 
-        print('DEBUG: Request data: $requestData');
-
-        // Save to database
         await dbHelper.insertOfflineRequest(requestData);
-        print('DEBUG: Offline request saved successfully');
-
-        // Navigate back and show confirmation
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -118,16 +167,14 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
         return;
       }
 
-      // 5. Online synchronizace
+      // 4. Online synchronizace
       try {
-        // Získání tokenu
         SharedPreferences prefs = await SharedPreferences.getInstance();
         String? token = prefs.getString('api_token');
         if (token == null) {
           throw Exception('Authentication token not found');
         }
 
-        // Příprava požadavku
         var request = http.MultipartRequest(
           'POST',
           Uri.parse(
@@ -137,65 +184,104 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
         request.headers.addAll(
             {'Authorization': 'Bearer $token', 'Accept': 'application/json'});
 
-        // Přidání souboru s fotkou
+        // Přidání souboru
         if (_moaMeasurementData != null) {
           request.files.add(
             await http.MultipartFile.fromPath(
-                'image', _moaMeasurementData!.originalImagePath),
+              'image',
+              _moaMeasurementData!.originalImagePath,
+            ),
           );
         } else {
           request.files.add(
-            await http.MultipartFile.fromPath('image', targetImage!.path),
+            await http.MultipartFile.fromPath('image', rotatedImage.path),
           );
         }
 
-        // Přidání volitelných polí
+        // Přidání polí
         if (distanceController.text.isNotEmpty) {
-          request.fields['distance'] = distanceController.text;
+          final distance =
+              double.parse(distanceController.text).round().toString();
+          request.fields['distance'] = distance;
         }
+
         if (notesController.text.isNotEmpty) {
           request.fields['notes'] = notesController.text;
         }
+
         if (selectedWeaponId != null) {
           request.fields['weapon_id'] = selectedWeaponId!;
         }
+
         if (_moaMeasurementData != null) {
-          request.fields['moa_data'] =
-              jsonEncode(_moaMeasurementData!.toJson());
+          final moaGroups = _moaMeasurementData!.groups
+              .map((group) =>
+                  {'moa': group.moaValue, 'shot_count': group.points.length})
+              .toList();
+          request.fields['moa_data'] = jsonEncode({'groups': moaGroups});
         } else if (_moaValue != null) {
-          request.fields['moa_value'] = _moaValue.toString();
-          request.fields['shot_count'] = _shotCount.toString();
+          request.fields['moa_data'] = jsonEncode({
+            'groups': [
+              {'moa': _moaValue, 'shot_count': _shotCount}
+            ]
+          });
         }
 
-        // Odeslání požadavku
+        // Odeslání a zpracování odpovědi
         final streamedResponse = await request.send();
         final response = await http.Response.fromStream(streamedResponse);
 
+        print('\n=== API RESPONSE DEBUG ===');
+        print('Status code: ${response.statusCode}');
+        print('Body: ${response.body}');
+
         if (response.statusCode == 201) {
-          // Úspěch - označit jako synchronizované
           await dbHelper.markPhotoAsSynced(photoId);
-          Navigator.pop(context);
+
+          // Add callback here
+          widget.onTargetAdded?.call();
+
+          if (!context.mounted) return;
+          Navigator.of(context).pop();
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Terč byl úspěšně uložen a synchronizován')),
           );
         } else {
-          // Chyba serveru
-          throw Exception(
-              'Server returned ${response.statusCode}: ${response.body}');
+          final responseData = json.decode(response.body);
+          if (responseData['error'] == 'Nedostatek volného místa') {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    Icon(Icons.warning_amber, color: Colors.white),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Nedostatek místa na serveru. Terč byl uložen lokálně.',
+                      ),
+                    ),
+                  ],
+                ),
+                duration: Duration(seconds: 5),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          } else {
+            throw Exception(
+                'Server returned ${response.statusCode}: ${response.body}');
+          }
         }
       } catch (e) {
         print('Error syncing with server: $e');
         Navigator.pop(context);
-
-        // Úspěšně uloženo lokálně, ale synchronizace se nezdařila
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content:
-                  Text('Terč uložen lokálně a bude synchronizován později')),
+            content: Text('Terč uložen lokálně a bude synchronizován později'),
+          ),
         );
       }
     } catch (e) {
-      // Kritická chyba - nepodařilo se ani lokální uložení
       print('Error in _submitData: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Chyba při ukládání: $e')),
@@ -204,10 +290,57 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
   }
 
   Future<void> _pickFromGallery() async {
-    setState(() {
-      targetImage = File('assets/test_target.jpg');
-    });
-    print('Test gallery photo selected');
+    final ImagePicker picker = ImagePicker();
+    final XFile? photo = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 100,
+        maxWidth: 1920,
+        maxHeight: 1080);
+
+    if (photo != null) {
+      setState(() {
+        targetImage = File(photo.path);
+      });
+      print('Selected image size: ${await targetImage!.length()} bytes');
+    }
+  }
+
+  Future<File> _saveRotatedImage() async {
+    if (targetImage == null || _imageRotation == 0) {
+      return targetImage!;
+    }
+
+    // Načtení původního obrázku
+    final imageBytes = await targetImage!.readAsBytes();
+    final codec = await ui.instantiateImageCodec(imageBytes);
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
+
+    // Vytvoření plátna pro otočený obrázek
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    // Rotace
+    canvas.translate(image.width / 2, image.height / 2);
+    canvas.rotate(_imageRotation);
+    canvas.translate(-image.width / 2, -image.height / 2);
+
+    // Vykreslení obrázku
+    canvas.drawImage(image, Offset.zero, Paint());
+
+    // Vytvoření nového obrázku
+    final picture = recorder.endRecording();
+    final rotatedImage = await picture.toImage(image.width, image.height);
+    final pngBytes =
+        await rotatedImage.toByteData(format: ui.ImageByteFormat.png);
+
+    // Uložení do nového souboru
+    final directory = await getTemporaryDirectory();
+    final fileName = 'rotated_${DateTime.now().millisecondsSinceEpoch}.png';
+    final rotatedFile = File('${directory.path}/$fileName');
+    await rotatedFile.writeAsBytes(pngBytes!.buffer.asUint8List());
+
+    return rotatedFile;
   }
 
   @override
@@ -284,10 +417,12 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
             Step(
               title: Text('Výběr náboje'),
               content: CartridgeSelectionWidget(
-                onCartridgeSelected: (cartridgeId, caliberId) {
+                onCartridgeSelected: (cartridgeId, caliberId, cartridgeName) {
                   setState(() {
                     selectedCartridgeId = cartridgeId;
                     selectedCaliberId = caliberId;
+                    selectedCartridgeName =
+                        cartridgeName; // Přidat ukládání názvu
                   });
                 },
               ),
@@ -297,7 +432,10 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
               title: Text('Výběr zbraně'),
               content: WeaponSelectionWidget(
                 caliberId: selectedCaliberId,
-                onWeaponSelected: (id) => setState(() => selectedWeaponId = id),
+                onWeaponSelected: (id, name) => setState(() {
+                  selectedWeaponId = id;
+                  selectedWeaponName = name; // Použít název ze zbraně místo ID
+                }),
               ),
               isActive: _currentStep >= 1,
             ),
@@ -305,9 +443,53 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
               title: Text('Fotografie'),
               content: Column(
                 children: [
-                  if (targetImage != null)
-                    Image.file(targetImage!, height: 200)
-                  else
+                  if (targetImage != null) ...[
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Transform.rotate(
+                          angle: _imageRotation,
+                          child: Image.file(targetImage!, height: 200),
+                        ),
+                        Positioned(
+                          bottom: 8,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: Icon(Icons.rotate_left,
+                                    color: Colors.white),
+                                onPressed: () => setState(() {
+                                  _imageRotation -= pi / 2;
+                                }),
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Colors.black54,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              IconButton(
+                                icon: Icon(Icons.rotate_right,
+                                    color: Colors.white),
+                                onPressed: () => setState(() {
+                                  _imageRotation += pi / 2;
+                                }),
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Colors.black54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: TextButton(
+                        onPressed: () => setState(() => targetImage = null),
+                        child: Text('Zrušit výběr'),
+                      ),
+                    ),
+                  ] else
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
@@ -353,14 +535,6 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
                         ),
                       ],
                     ),
-                  if (targetImage != null)
-                    Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: TextButton(
-                        onPressed: () => setState(() => targetImage = null),
-                        child: Text('Zrušit výběr'),
-                      ),
-                    ),
                 ],
               ),
               isActive: _currentStep >= 2,
@@ -372,11 +546,17 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
                   if (targetImage != null)
                     ElevatedButton(
                       onPressed: () async {
+                        final rotatedImage = await _saveRotatedImage();
                         final MoaMeasurementData? result = await Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (context) => MoaMeasurementScreen(
-                              imageFile: targetImage!,
+                              imageFile: rotatedImage, // Already rotated image
+                              weaponName: selectedWeaponName,
+                              cartridgeName: selectedCartridgeName,
+                              distance: distanceController.text.isNotEmpty
+                                  ? double.tryParse(distanceController.text)
+                                  : null,
                             ),
                           ),
                         );
@@ -384,10 +564,13 @@ class _TargetPhotoScreenState extends State<TargetPhotoScreen> {
                         if (result != null) {
                           setState(() {
                             _moaMeasurementData = result;
-                            // Keep simple values for compatibility
                             if (result.groups.isNotEmpty) {
                               _moaValue = result.groups[0].moaValue;
                               _shotCount = result.groups[0].points.length;
+                            }
+                            if (result.distance != null) {
+                              distanceController.text =
+                                  result.distance.toString();
                             }
                           });
                         }

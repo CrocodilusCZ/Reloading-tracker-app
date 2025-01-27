@@ -736,62 +736,52 @@ class DatabaseHelper {
         await txn.delete('cartridges');
 
         for (var cartridgeData in cartridges) {
-          if (cartridgeData['id'] == null || cartridgeData['name'] == null) {
-            print("Neplatný náboj: $cartridgeData - přeskočeno.");
-            continue;
+          try {
+            // Debug print
+            print(
+                'Zpracovávám náboj: ${cartridgeData['name']}, Typ: ${cartridgeData['type']}, Kalibr: ${cartridgeData['caliber']?['name'] ?? 'N/A'}');
+
+            final cartridgeMap = {
+              'id': cartridgeData['id'],
+              'name': cartridgeData['name'],
+              'cartridge_type': cartridgeData['type'] ?? 'factory',
+              'caliber_id': cartridgeData['caliber_id'] ??
+                  cartridgeData['caliber']?['id'],
+              'caliber_name': cartridgeData['caliber']?['name'] ?? 'Unknown',
+              'stock_quantity': cartridgeData['stock_quantity'] ?? 0,
+              'price': cartridgeData['price']?.toString() ?? '0',
+              'manufacturer': cartridgeData['manufacturer'],
+              'bullet_specification': cartridgeData['bullet_specification'],
+              'bullet_name': cartridgeData['bullet_name'],
+              'bullet_weight_grains':
+                  cartridgeData['bullet_weight_grains']?.toString(),
+              'powder_name': cartridgeData['powder_name'],
+              'powder_weight': cartridgeData['powder_weight']?.toString(),
+              'primer_name': cartridgeData['primer_name'],
+              'barcode': cartridgeData['barcode'],
+              'is_favorite': cartridgeData['is_favorite'] == true ? 1 : 0,
+              'created_at': cartridgeData['created_at'],
+              'updated_at': cartridgeData['updated_at'],
+            };
+
+            await txn.insert(
+              'cartridges',
+              cartridgeMap,
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+
+            print('Úspěšně vložen náboj: ${cartridgeMap['name']}');
+          } catch (e) {
+            print('Chyba při zpracování náboje ${cartridgeData['name']}: $e');
           }
-
-          final caliberId =
-              cartridgeData['caliber']?['id'] ?? cartridgeData['caliber_id'];
-          final caliberName = cartridgeData['caliber']?['name'] ??
-              cartridgeData['caliber_name'];
-
-          // Extrakce dat o komponentách
-          final bulletName =
-              cartridgeData['bullet']?['name'] ?? cartridgeData['bullet_name'];
-          final powderName =
-              cartridgeData['powder']?['name'] ?? cartridgeData['powder_name'];
-          final primerName =
-              cartridgeData['primer']?['name'] ?? cartridgeData['primer_name'];
-
-          final cartridgeMap = {
-            'id': cartridgeData['id'],
-            'name': cartridgeData['name'],
-            'cartridge_type': cartridgeData['type'] ?? 'unknown',
-            'caliber_id': caliberId,
-            'caliber_name': caliberName,
-            'stock_quantity': cartridgeData['stock_quantity'] ?? 0,
-            'price': cartridgeData['price']?.toString() ?? '0',
-            'manufacturer': cartridgeData['manufacturer'],
-            'bullet_specification': cartridgeData['bullet_specification'],
-            'bullet_name': bulletName, // Přidáno
-            'bullet_weight_grains':
-                cartridgeData['bullet']?['weight_grains']?.toString(),
-            'powder_name': powderName, // Přidáno
-            'powder_weight': cartridgeData['powder_weight']?.toString(),
-            'primer_name': primerName, // Přidáno
-            'velocity_ms': cartridgeData['velocity_ms']?.toString(),
-            'standard_deviation':
-                cartridgeData['standard_deviation']?.toString(),
-            'oal': cartridgeData['oal']?.toString(),
-            'barcode': cartridgeData['barcode'],
-            'is_favorite': cartridgeData['is_favorite'] == true ? 1 : 0,
-            'created_at': cartridgeData['created_at'],
-            'updated_at': cartridgeData['updated_at'],
-          };
-
-          await txn.insert(
-            'cartridges',
-            cartridgeMap,
-            conflictAlgorithm: ConflictAlgorithm.replace,
-          );
         }
       });
 
       print("Synchronizace nábojů dokončena. Počet: ${cartridges.length}");
-    } catch (e) {
+    } catch (e, stackTrace) {
       print("Chyba při synchronizaci nábojů: $e");
-      throw e;
+      print("Stack trace: $stackTrace");
+      rethrow;
     }
   }
 
@@ -1144,6 +1134,20 @@ class DatabaseHelper {
     });
   }
 
+  Future<Map<String, dynamic>> getUserProfile() async {
+    final db = await database;
+    final List<Map<String, dynamic>> profiles = await db.query('user_profile');
+
+    if (profiles.isEmpty) {
+      return {
+        'total_storage_used': 0,
+        'custom_storage_limit': 0 // Změněno z hardcoded hodnoty
+      };
+    }
+
+    return profiles.first;
+  }
+
   Future<void> cacheCartridges(List<Map<String, dynamic>> cartridges) async {
     final db = await database;
 
@@ -1197,25 +1201,43 @@ class DatabaseHelper {
     });
   }
 
-  Future<List<TargetPhotoRequest>> getUnsyncedPhotos() async {
+  Future<List<Map<String, dynamic>>> getUnsyncedPhotos() async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'target_photos',
-      where: 'is_synced = ?',
-      whereArgs: [0],
-    );
-
-    return maps.map((map) => TargetPhotoRequest.fromJson(map)).toList();
+    print('Fetching unsynced photos...');
+    try {
+      final List<Map<String, dynamic>> result = await db.query(
+        'target_photos',
+        where: 'is_synced = ?',
+        whereArgs: [0],
+      );
+      print('Found ${result.length} unsynced photos');
+      return result;
+    } catch (e) {
+      print('Error fetching unsynced photos: $e');
+      return [];
+    }
   }
 
-  Future<void> markPhotoAsSynced(int id) async {
+  Future<void> markPhotoAsSynced(int? photoId) async {
+    if (photoId == null) {
+      print('Warning: Attempting to mark null photoId as synced');
+      return;
+    }
+
     final db = await database;
-    await db.update(
-      'target_photos',
-      {'is_synced': 1},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    print('Marking photo $photoId as synced');
+    try {
+      await db.update(
+        'target_photos',
+        {'is_synced': 1},
+        where: 'id = ?',
+        whereArgs: [photoId],
+      );
+      print('Successfully marked photo $photoId as synced');
+    } catch (e) {
+      print('Error marking photo as synced: $e');
+      throw e;
+    }
   }
 
   Future<void> deleteTargetPhoto(int id) async {

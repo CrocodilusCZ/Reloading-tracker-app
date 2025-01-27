@@ -9,7 +9,10 @@ class DatabaseSchema {
         id INTEGER PRIMARY KEY,
         name TEXT,
         email TEXT,
-        last_sync DATETIME
+        last_sync DATETIME,
+        storage_limit INTEGER,
+        storage_used INTEGER,
+        last_storage_check DATETIME
       )''');
       print("Tabulka user_profile vytvořena.");
 
@@ -88,6 +91,8 @@ class DatabaseSchema {
         max_pressure TEXT,
         user_id INTEGER,
         is_global INTEGER DEFAULT 0,
+        is_monitored INTEGER DEFAULT 0,  
+        monitoring_threshold INTEGER DEFAULT 100,
         created_at DATETIME,
         updated_at DATETIME
     )''');

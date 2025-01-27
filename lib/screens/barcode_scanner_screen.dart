@@ -26,6 +26,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
   String? barcodeStatus;
   bool isProcessing = false;
   bool isFlashOn = false; // Výchozí stav svítilny
+  Map<String, int> stockQuantities = {};
 
   @override
   void initState() {
@@ -42,12 +43,19 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     super.dispose();
   }
 
+  void _updateStockQuantity(String barcode, int newStock) {
+    setState(() {
+      stockQuantities[barcode] = newStock;
+    });
+  }
+
   void _onQRViewCreated(QRViewController controller) {
     this.controller = controller;
     controller.scannedDataStream.listen((scanData) async {
       if (!isProcessing) {
         isProcessing = true;
         await controller.pauseCamera();
+
         setState(() {
           scannedCode = scanData.code;
         });
@@ -56,7 +64,16 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
           Vibration.vibrate(duration: 500);
         }
 
-        await _checkBarcode(scannedCode!);
+        try {
+          print('DEBUG: Processing barcode: ${scanData.code}');
+          await _checkBarcode(scannedCode!);
+        } catch (e) {
+          print('ERROR: Failed to process barcode: $e');
+          _showMessage('Chyba při zpracování čárového kódu');
+          await _resetScanner();
+        } finally {
+          isProcessing = false;
+        }
       }
     });
   }
@@ -77,44 +94,56 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
   Future<void> _checkBarcode(String scannedBarcode) async {
     try {
+      print('DEBUG: Starting barcode check for: $scannedBarcode');
+
       // Try local DB first
       final dbHelper = DatabaseHelper();
+      print('DEBUG: Querying local database...');
       final localCartridge =
           await dbHelper.getCartridgeByBarcode(scannedBarcode);
+      print('DEBUG: Local database result: $localCartridge');
 
       if (localCartridge != null) {
         final bool isCartridgeDetailScreen =
             widget.source == 'cartridge_detail';
+        print(
+            'DEBUG: Found in local DB. isCartridgeDetailScreen: $isCartridgeDetailScreen');
+
         setState(() {
           barcodeStatus =
               'Čárový kód je přiřazen k náboji ${localCartridge['name']}';
         });
 
         if (isCartridgeDetailScreen) {
+          print(
+              'DEBUG: Cartridge detail screen - showing already assigned message');
           _showMessage('Tento čárový kód je již přiřazen k jinému náboji');
           await _resetScanner();
         } else {
-          String caliberName =
-              localCartridge['caliber_name'] ?? 'Neznámý kalibr';
-          int packageSize = localCartridge['package_size'] ?? 0;
-          await _showIncreaseStockDialog(
+          print('DEBUG: Showing increase stock dialog for local cartridge');
+          await _showStockUpdateDialog(
             scannedBarcode,
             localCartridge['name'],
             localCartridge['manufacturer'] ?? 'Neznámý výrobce',
-            caliberName,
-            packageSize,
+            localCartridge['caliber_name'] ?? 'Neznámý kalibr',
+            localCartridge['package_size'] ?? 0,
           );
         }
         return;
       }
 
-      // If not found locally and online, try API
+      // If not found locally, try API if online
+      print('DEBUG: Not found locally, checking online status...');
       if (await isOnline()) {
+        print('DEBUG: Device is online, calling API...');
         final response = await ApiService.checkBarcode(scannedBarcode);
-        // Use existing API response handling logic
+        print('DEBUG: API response: $response');
+
         final bool isCartridgeDetailScreen =
             widget.source == 'cartridge_detail';
         final bool barcodeExists = response['exists'] == true;
+        print(
+            'DEBUG: barcodeExists: $barcodeExists, isCartridgeDetailScreen: $isCartridgeDetailScreen');
 
         setState(() {
           barcodeStatus = barcodeExists
@@ -122,109 +151,310 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
               : 'Čárový kód není přiřazen.';
         });
 
-        // Rest of your existing logic...
-        if (isCartridgeDetailScreen) {
-          // Your existing CartridgeDetailScreen logic
+        if (!barcodeExists) {
+          print('DEBUG: Barcode not exists, showing assign dialog');
+          await _showAssignBarcodeDialog(scannedBarcode);
+        } else if (isCartridgeDetailScreen) {
+          print(
+              'DEBUG: Cartridge detail screen - showing already assigned message');
+          _showMessage('Tento čárový kód je již přiřazen k jinému náboji');
+          await _resetScanner();
         } else {
-          // Your existing main screen logic
+          print('DEBUG: Showing increase stock dialog for API cartridge');
+          final cartridge = response['cartridge'];
+          await _showStockUpdateDialog(
+            scannedBarcode,
+            cartridge['name'],
+            cartridge['manufacturer'] ?? 'Neznámý výrobce',
+            cartridge['caliber']['name'] ?? 'Neznámý kalibr',
+            cartridge['package_size'] ?? 0,
+            cartridgeId: cartridge['id'], // Pass ID directly
+          );
         }
       } else {
+        print('DEBUG: Device is offline');
         _showMessage('Náboj nebyl nalezen v offline databázi');
         await _resetScanner();
       }
-    } catch (e) {
-      print('Error checking barcode: $e');
+    } catch (e, stackTrace) {
+      print('ERROR: Barcode check failed');
+      print('Exception: $e');
+      print('Stack trace: $stackTrace');
       _showMessage('Chyba při kontrole čárového kódu');
       await _resetScanner();
     }
   }
 
-  Future<void> _showIncreaseStockDialog(
+  Future<void> _showStockUpdateDialog(
       String scannedBarcode,
       String cartridgeName,
       String manufacturerName,
       String caliber,
-      int packageSize) async {
-    // Get current stock
-    final dbHelper = DatabaseHelper();
-    final cartridge = await dbHelper.getCartridgeByBarcode(scannedBarcode);
-    final currentStock = cartridge?['stock_quantity'] ?? 0;
+      int packageSize,
+      {int? cartridgeId}) async {
+    if (cartridgeId == null) {
+      _showMessage('Nelze získat ID náboje');
+      return;
+    }
 
-    final TextEditingController quantityController = TextEditingController(
+    int currentStock = 0;
+    final scaffoldContext = context;
+
+    // Get current stock
+    if (await isOnline()) {
+      try {
+        final response = await ApiService.checkBarcode(scannedBarcode);
+        if (response['exists'] && response['cartridge'] != null) {
+          currentStock = response['cartridge']['stock_quantity'] ?? 0;
+          _updateStockQuantity(scannedBarcode, currentStock);
+        }
+      } catch (e) {
+        print('Nelze načíst aktuální stav: $e');
+        final dbHelper = DatabaseHelper();
+        final cartridge = await dbHelper.getCartridgeByBarcode(scannedBarcode);
+        currentStock = stockQuantities[scannedBarcode] ??
+            cartridge?['stock_quantity'] ??
+            0;
+      }
+    } else {
+      final dbHelper = DatabaseHelper();
+      final cartridge = await dbHelper.getCartridgeByBarcode(scannedBarcode);
+      currentStock =
+          stockQuantities[scannedBarcode] ?? cartridge?['stock_quantity'] ?? 0;
+    }
+
+    bool isIncrease = true;
+    final quantityController = TextEditingController(
         text: packageSize > 0 ? packageSize.toString() : '');
 
     await showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: Text('Navýšení skladové zásoby pro $cartridgeName'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Výrobce: $manufacturerName'),
-              Text('Kalibr: $caliber'),
-              Text('Aktuálně skladem: $currentStock ks',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              TextField(
-                controller: quantityController,
-                keyboardType: TextInputType.number,
-                decoration:
-                    const InputDecoration(labelText: 'Zadejte množství'),
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text('Upravit zásobu pro $cartridgeName'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: true, label: Text('Přidat')),
+                      ButtonSegment(value: false, label: Text('Odebrat')),
+                    ],
+                    selected: {isIncrease},
+                    onSelectionChanged: (Set<bool> newValue) {
+                      setDialogState(() => isIncrease = newValue.first);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Výrobce: $manufacturerName'),
+                  Text('Kalibr: $caliber'),
+                  Text('Aktuálně skladem: $currentStock ks',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: quantityController,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    decoration:
+                        const InputDecoration(labelText: 'Zadejte množství'),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      for (final amount in [1, 10, 100])
+                        ElevatedButton(
+                          onPressed: () {
+                            final currentValue =
+                                int.tryParse(quantityController.text) ?? 0;
+                            quantityController.text =
+                                (currentValue + amount).toString();
+                          },
+                          child: Text('+$amount'),
+                        ),
+                    ],
+                  ),
+                ],
               ),
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () async {
-                int quantity = int.tryParse(quantityController.text) ?? 0;
-                Navigator.pop(dialogContext);
-                if (quantity > 0) {
-                  try {
-                    await ApiService.increaseStockByBarcode(
-                        scannedBarcode, quantity);
-                    _showMessage(
-                        'Skladová zásoba byla navýšena o $quantity kusů.');
-                  } catch (e) {
-                    _showMessage(
-                      'Skladová zásoba byla navýšena o $quantity kusů.\n'
-                      'Změny budou synchronizovány po obnovení připojení.',
-                    );
-                  }
-                }
-                await _resetScanner();
-              },
-              child: const Text('OK'),
-            ),
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(dialogContext);
-                await _resetScanner();
-              },
-              child: const Text('Zrušit'),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Zrušit'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    int quantity = int.tryParse(quantityController.text) ?? 0;
+                    if (quantity <= 0) return;
+
+                    Navigator.pop(dialogContext);
+
+                    final adjustedQuantity = isIncrease ? quantity : -quantity;
+                    final operation = isIncrease ? 'navýšena' : 'snížena';
+
+                    try {
+                      if (await isOnline()) {
+                        final response = await ApiService.increaseCartridge(
+                            cartridgeId, adjustedQuantity);
+
+                        if (response.containsKey('newStock')) {
+                          _updateStockQuantity(
+                              scannedBarcode, response['newStock']);
+
+                          ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                              SnackBar(
+                                  content: Text(
+                                      'Skladová zásoba byla $operation o $quantity kusů.')));
+
+                          if (response['warning'] != null) {
+                            final warning = response['warning'];
+                            if (warning['type'] == 'low_stock') {
+                              await Future.delayed(const Duration(seconds: 1));
+
+                              final cartridgesList = (warning['cartridges']
+                                      as List)
+                                  .map((c) => '${c['name']}: ${c['stock']} ks')
+                                  .join('\n');
+
+                              ScaffoldMessenger.of(scaffoldContext)
+                                  .showSnackBar(
+                                SnackBar(
+                                  content: Row(
+                                    children: [
+                                      const Icon(Icons.warning_amber,
+                                          color: Colors.white),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(warning['message']),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Celkem nábojů: ${warning['current_total']} ks (limit: ${warning['threshold']} ks)',
+                                              style:
+                                                  const TextStyle(fontSize: 12),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(cartridgesList,
+                                                style: const TextStyle(
+                                                    fontSize: 12)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  backgroundColor: Colors.orange,
+                                  duration: const Duration(seconds: 5),
+                                  behavior: SnackBarBehavior.floating,
+                                  margin: const EdgeInsets.all(8),
+                                ),
+                              );
+                            }
+                          }
+                          await _resetScanner();
+                          return;
+                        }
+                        throw Exception('API nevrátilo platnou odpověď');
+                      }
+
+                      // Offline mode
+                      final newStock = currentStock + adjustedQuantity;
+                      _updateStockQuantity(scannedBarcode, newStock);
+
+                      await DatabaseHelper().addOfflineRequest(
+                        'update_stock',
+                        {'id': cartridgeId, 'quantity': adjustedQuantity},
+                      );
+
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Skladová zásoba byla $operation o $quantity kusů.\n'
+                            'Změny budou synchronizovány po obnovení připojení.',
+                          ),
+                        ),
+                      );
+                    } catch (e) {
+                      print('Chyba při úpravě zásob: $e');
+
+                      final newStock = currentStock + adjustedQuantity;
+                      _updateStockQuantity(scannedBarcode, newStock);
+
+                      await DatabaseHelper().addOfflineRequest(
+                        'update_stock',
+                        {'id': cartridgeId, 'quantity': adjustedQuantity},
+                      );
+
+                      ScaffoldMessenger.of(scaffoldContext).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Chyba při komunikaci se serverem. Změna uložena offline.'),
+                        ),
+                      );
+                    }
+
+                    await _resetScanner();
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
 
   Future<void> _showAssignBarcodeDialog(String scannedBarcode) async {
-    try {
-      final cartridgesResponse = await ApiService.getFactoryCartridges();
-      print('Odpověď API (seznam továrních nábojů): $cartridgesResponse');
+    print('DEBUG: Starting _showAssignBarcodeDialog');
 
-      // Sort cartridges - unassigned first
+    try {
+      // Show loading dialog
+      BuildContext? dialogContext;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) {
+          dialogContext = context;
+          return const AlertDialog(
+            title: Text('Načítání...'),
+            content: CircularProgressIndicator(),
+          );
+        },
+      );
+
+      // Fetch data
+      print('DEBUG: Fetching factory cartridges...');
+      final cartridgesResponse = await ApiService.getFactoryCartridges();
+      print('DEBUG: Got ${cartridgesResponse.length} factory cartridges');
+
+      // Close loading dialog
+      if (dialogContext != null) {
+        Navigator.pop(dialogContext!);
+      }
+
+      if (!mounted) return;
+
+      // Sort cartridges...
+      print('DEBUG: Sorting cartridges...');
       final sortedCartridges = [...cartridgesResponse]..sort((a, b) {
           bool aHasBarcode = a['barcode'] != null && a['barcode'] != '';
           bool bHasBarcode = b['barcode'] != null && b['barcode'] != '';
           return aHasBarcode ? 1 : -1;
         });
 
+      // Now show the main dialog
+      print('DEBUG: Showing main dialog');
       await showDialog(
         context: context,
+        barrierDismissible: false,
         builder: (BuildContext dialogContext) {
+          print('DEBUG: Building main dialog');
           return AlertDialog(
             title: const Text('Přiřadit čárový kód'),
             content: Container(
@@ -233,7 +463,7 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    // Create New Button at top
+                    // Create New Button
                     Container(
                       margin: const EdgeInsets.only(bottom: 16),
                       child: ElevatedButton.icon(
@@ -360,8 +590,12 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
           );
         },
       );
-    } catch (e) {
-      _showMessage('Chyba při načítání továrních nábojů: ${e.toString()}');
+    } catch (e, stack) {
+      print('ERROR in _showAssignBarcodeDialog: $e');
+      print('Stack trace: $stack');
+      if (mounted)
+        Navigator.pop(context); // Close loading dialog if still showing
+      _showMessage('Chyba při načítání nábojů: ${e.toString()}');
       await _resetScanner();
     }
   }

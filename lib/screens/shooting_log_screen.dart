@@ -342,7 +342,6 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
     print('Hledám náboj pro kód: $code');
 
     try {
-      // Get database helper instance
       final dbHelper = DatabaseHelper();
 
       // First try local database
@@ -352,7 +351,6 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       if (localCartridge != null) {
         print('Náboj nalezen v lokální DB');
         setState(() {
-          // Format the data in the same structure as API response
           cartridgeData = {
             'cartridge': {
               ...localCartridge,
@@ -370,9 +368,25 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
         return;
       }
 
-      // If not found locally, show error
+      // If not found locally, try online API
+      final bool online = await isOnline();
+      if (online) {
+        final apiResponse = await ApiService.checkBarcode(code);
+        if (apiResponse['cartridge'] != null) {
+          setState(() {
+            cartridgeData = apiResponse;
+            cartridgeInfo = 'Náboj: ${apiResponse['cartridge']['name']}\n'
+                'Kalibr: ${apiResponse['cartridge']['caliber']['name']}\n'
+                'Sklad: ${apiResponse['cartridge']['stock_quantity']} ks';
+          });
+          _showCartridgeInfoDialog();
+          return;
+        }
+      }
+
+      // Not found anywhere
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Náboj nebyl nalezen v lokální databázi')),
+        const SnackBar(content: Text('Náboj nebyl nalezen nikde')),
       );
     } catch (e) {
       print('Chyba při hledání náboje: $e');
@@ -758,16 +772,68 @@ class _ShootingLogScreenState extends State<ShootingLogScreen> {
       if (online) {
         try {
           final response = await ApiService.createShootingLog(shootingLogData);
-          if (response.containsKey('shooting_log_id')) {
+
+          if (response != null && response['success'] == true) {
+            // Show success message
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                  content: Text(
-                      'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}')),
+                content: Text(
+                    'Záznam úspěšně uložen. ID: ${response['shooting_log_id']}'),
+                duration: const Duration(seconds: 3),
+              ),
             );
+
+            // Check for warning
+            if (response['warning'] != null) {
+              final warning = response['warning'];
+              if (warning['type'] == 'low_stock') {
+                await Future.delayed(const Duration(seconds: 1));
+
+                final cartridgesList = (warning['cartridges'] as List)
+                    .map((c) => '${c['name']}: ${c['stock']} ks')
+                    .join('\n');
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        const Icon(Icons.warning_amber, color: Colors.white),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(warning['message']),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Celkem nábojů: ${warning['current_total']} ks (limit: ${warning['threshold']} ks)',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                cartridgesList,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    backgroundColor: Colors.orange,
+                    duration: const Duration(seconds: 5),
+                    behavior: SnackBarBehavior.floating,
+                    margin: const EdgeInsets.all(8),
+                  ),
+                );
+              }
+            }
+
             Navigator.of(context).pop();
-          } else {
-            throw Exception(response['error'] ?? 'Chyba při ukládání.');
+            return; // Success - exit early
           }
+
+          throw Exception(response['error'] ?? 'Chyba při ukládání.');
         } catch (e) {
           print('API Error: $e');
           await _saveOfflineShootingLog(shootingLogData, dbHelper);

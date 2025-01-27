@@ -6,8 +6,9 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import '../screens/qr_scan_screen.dart';
 
 class CartridgeSelectionWidget extends StatefulWidget {
-  final Function(String cartridgeId, String caliberId) onCartridgeSelected;
-
+  final void Function(
+          String cartridgeId, String caliberId, String cartridgeName)
+      onCartridgeSelected;
   const CartridgeSelectionWidget({
     Key? key,
     required this.onCartridgeSelected,
@@ -158,7 +159,9 @@ class _CartridgeSelectionWidgetState extends State<CartridgeSelectionWidget> {
         selectedCartridgeId = id;
       });
 
-      widget.onCartridgeSelected(id, caliberId);
+      widget.onCartridgeSelected(id, caliberId,
+          cartridgeData['name'].toString() // získat název z načtených dat
+          );
     } catch (e, stackTrace) {
       print('Error in barcode scanning: $e');
       print('Stack trace: $stackTrace');
@@ -302,7 +305,10 @@ class _CartridgeSelectionWidgetState extends State<CartridgeSelectionWidget> {
 
               // Pass both IDs to parent
               widget.onCartridgeSelected(
-                  selectedCartridgeId!, selectedCaliberId!);
+                selectedCartridgeId!,
+                selectedCaliberId!,
+                selectedCartridge['name'].toString(), // Přidáno
+              );
             }
           },
         ),

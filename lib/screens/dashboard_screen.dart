@@ -26,14 +26,14 @@ import 'package:shooting_companion/helpers/connectivity_helper.dart';
 import 'package:shooting_companion/services/sync_service.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:http/http.dart' as http;
-import 'package:shooting_companion/screens/target_photo_screen.dart';
 import 'package:shooting_companion/widgets/connectivity_monitor.dart';
+import 'package:shooting_companion/screens/shooting_logs_overview_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
 
   const DashboardScreen({super.key, required this.username});
-  static const String currentVersion = "1.0.7"; // Aktuální verze aplikace
+  static const String currentVersion = "1.1.5"; // Aktuální verze aplikace
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
@@ -51,6 +51,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late SyncService _syncService;
   bool _previousOnlineState = false;
   int _pendingRequestsCount = 0;
+  Timer? _pendingRequestsTimer;
+  bool _isUpdatingPendingCount = false;
 
   @override
   void initState() {
@@ -60,6 +62,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _updatePendingRequestsCount();
     DatabaseHelper()
         .setOnOfflineRequestAddedCallback(_updatePendingRequestsCount);
+
+    setState(() {
+      isSyncing = true;
+    });
 
     // Nejdřív inicializujeme SyncService
     _syncService = SyncService(
@@ -92,6 +98,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             'caliber_name': cartridge['caliber_name'] ?? 'Unknown',
           };
         }).toList();
+
+        // Nastavíme synchronizaci na false po dokončení
+        if (mounted) {
+          setState(() {
+            isSyncing = false;
+          });
+        }
 
         // Rozdělení na tovární a přebíjené náboje
         final factory = cleanedCartridges
@@ -143,20 +156,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _updatePendingRequestsCount() async {
-    print('Aktualizuji počet pending requestů...');
-    final db = await DatabaseHelper().database;
-    final count = Sqflite.firstIntValue(await db.rawQuery(
-      'SELECT COUNT(*) FROM offline_requests WHERE status = ?',
-      ['pending'],
-    ));
-    print('Nalezeno ${count ?? 0} pending requestů');
+    if (_isUpdatingPendingCount) return;
 
-    if (mounted) {
-      setState(() {
-        _pendingRequestsCount = count ?? 0;
-        print('Aktualizován stav: $_pendingRequestsCount pending requestů');
-      });
-    }
+    // Zrušit předchozí timer pokud existuje
+    _pendingRequestsTimer?.cancel();
+
+    // Nastavit nový timer
+    _pendingRequestsTimer = Timer(Duration(milliseconds: 500), () async {
+      _isUpdatingPendingCount = true;
+
+      try {
+        final db = await DatabaseHelper().database;
+        final count = Sqflite.firstIntValue(await db.rawQuery(
+          'SELECT COUNT(*) FROM offline_requests WHERE status = ?',
+          ['pending'],
+        ));
+
+        if (mounted) {
+          setState(() {
+            _pendingRequestsCount = count ?? 0;
+          });
+        }
+      } finally {
+        _isUpdatingPendingCount = false;
+      }
+    });
   }
 
   Future<void> _checkVersion() async {
@@ -537,142 +561,243 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Shooting Companion', // Hlavní nadpis nahoře
+                    'Shooting Companion',
                     style: TextStyle(
-                      fontSize: 20, // Větší velikost písma
-                      fontWeight: FontWeight.bold, // Tučné písmo
-                      color: Colors.white, // Barva textu
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                  SizedBox(
-                      height: 16), // Mezera mezi nadpisem a řádkem s ikonou
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                  Text(
+                    'v${DashboardScreen.currentVersion}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white70,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  Spacer(),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.person,
-                        size: 16, // Zmenšená ikona
-                        color: Colors.white,
-                      ),
-                      SizedBox(width: 8), // Menší mezera mezi ikonou a textem
-                      Expanded(
-                        child: Text(
-                          username,
-                          style: TextStyle(
-                            fontSize: 16, // Menší velikost písma pro nick
-                            fontWeight:
-                                FontWeight.normal, // Normální váha písma
-                            color: Colors.white70, // Světlejší barva textu
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.person,
+                            size: 16,
+                            color: Colors.white70,
                           ),
-                          overflow: TextOverflow
-                              .ellipsis, // Oříznutí textu při přetečení
-                        ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              username,
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.white70,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.storage,
+                            size: 16,
+                            color: Colors.white70,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: FutureBuilder<Map<String, dynamic>>(
+                              future: DatabaseHelper().getUserProfile(),
+                              builder: (context, snapshot) {
+                                if (!snapshot.hasData) {
+                                  return CircularProgressIndicator();
+                                }
+
+                                final totalStorageUsed =
+                                    snapshot.data!['storage_used'] ?? 0;
+                                final storageLimit =
+                                    snapshot.data!['storage_limit'] ?? 0;
+
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(2),
+                                      child: LinearProgressIndicator(
+                                        value: totalStorageUsed / storageLimit,
+                                        backgroundColor: Colors.white24,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                                Colors.lightBlueAccent),
+                                        minHeight: 4,
+                                      ),
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      '${(totalStorageUsed / 1048576).toStringAsFixed(1)} MB / ${(storageLimit / 1048576).toStringAsFixed(0)} MB',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ],
               ),
             ),
+            const Divider(height: 1),
             ListTile(
-              leading: Icon(Icons.delete, color: Colors.red),
-              title: Text('Smazat databázi'),
-              onTap: () {
-                Navigator.of(context).pop(); // Zavřít Drawer
-                showDialog(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return AlertDialog(
-                      title: Text('Potvrdit akci'),
-                      content: Text(
-                          'Opravdu chcete smazat databázi? Tato akce je nevratná.'),
-                      actions: <Widget>[
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: Text('Zrušit'),
+              title: const Text(
+                '⚙️ Systémové funkce',
+                style: TextStyle(
+                  color: const Color(0xFFD32F2F),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              subtitle: const Text(
+                'Upozornění: Tyto funkce jsou určeny pouze pro pokročilé uživatele',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+            ExpansionTile(
+              title: const Text(
+                'Správa dat',
+                style: const TextStyle(color: Color(0xFF616161)),
+              ),
+              leading: const Icon(Icons.admin_panel_settings),
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.delete_forever, color: Colors.red),
+                  title: const Text('Smazat databázi'),
+                  subtitle: const Text('Nevratně smaže všechna data'),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    showDialog(
+                      context: context,
+                      builder: (BuildContext context) => AlertDialog(
+                        title: const Text('⚠️ Nebezpečná operace'),
+                        content: const Text(
+                          'Opravdu chcete smazat databázi?\nTato akce je NEVRATNÁ!',
+                          style: TextStyle(color: Colors.red),
                         ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            _deleteDatabase();
-                          },
-                          child: Text('Smazat'),
-                        ),
-                      ],
+                        actions: <Widget>[
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('Zrušit'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              _deleteDatabase();
+                            },
+                            child: const Text('Smazat',
+                                style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      ),
                     );
                   },
-                );
-              },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.download),
+                  title: const Text('Export databáze'),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    exportDatabase();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.share),
+                  title: const Text('Sdílet databázi'),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    shareDatabaseFile();
+                  },
+                ),
+              ],
             ),
-            ListTile(
-              leading: Icon(Icons.download, color: Colors.green),
-              title: Text('Exportovat databázi'),
-              onTap: () {
-                Navigator.of(context).pop(); // Zavřít Drawer
-                exportDatabase();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.share, color: Colors.blue),
-              title: Text('Sdílet databázi'),
-              onTap: () {
-                Navigator.of(context).pop(); // Zavřít Drawer
-                shareDatabaseFile();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.filter_alt, color: Colors.orange),
-              title: Text('Test Filtru'),
-              onTap: () async {
-                Navigator.of(context).pop(); // Zavřít Drawer
-                final dbHelper = DatabaseHelper();
-                final cartridges = await dbHelper.fetchCartridgesFromSQLite();
-                print("Test filtru: Načteno ${cartridges.length} nábojů.");
-                final filtered = dbHelper.applyFilter(cartridges);
-                print(
-                    "Test filtru: Po aplikaci filtru: ${filtered.length} nábojů.");
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: Text("Výsledky Testu Filtru"),
-                    content: Text(
-                      filtered.isEmpty
-                          ? "Nebyl nalezen žádný validní náboj."
-                          : "Validní náboje:\n${filtered.map((e) => e['name']).join('\n')}",
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: Text("Zavřít"),
+            ExpansionTile(
+              title: const Text(
+                'Vývojářské nástroje',
+                style: TextStyle(color: Color(0xFF616161)),
+              ),
+              leading: const Icon(Icons.code),
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.filter_alt),
+                  title: const Text('Test filtru'),
+                  onTap: () async {
+                    Navigator.of(context).pop();
+                    final dbHelper = DatabaseHelper();
+                    final cartridges =
+                        await dbHelper.fetchCartridgesFromSQLite();
+                    print("Test filtru: Načteno ${cartridges.length} nábojů.");
+                    final filtered = dbHelper.applyFilter(cartridges);
+                    print(
+                        "Test filtru: Po aplikaci filtru: ${filtered.length} nábojů.");
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text("Výsledky testu filtru"),
+                        content: Text(
+                          filtered.isEmpty
+                              ? "Nebyl nalezen žádný validní náboj."
+                              : "Validní náboje:\n${filtered.map((e) => e['name']).join('\n')}",
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text("Zavřít"),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.table_chart, color: Colors.purple),
-              title: Text('Prohlížet databázi'),
-              onTap: () {
-                Navigator.of(context).pop(); // Zavřít Drawer
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => DatabaseViewScreen()),
-                );
-              },
-            ),
-            ListTile(
-              leading:
-                  Icon(Icons.storage, color: Colors.indigo), // Ikona tlačítka
-              title: Text('Test SQL Dotazu'), // Text tlačítka
-              onTap: () {
-                Navigator.of(context).pop(); // Zavře Drawer
-                testSQLQuery(); // Volání bez použití await
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Testovací SQL dotaz byl proveden.')),
-                );
-              },
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.table_chart),
+                  title: const Text('Prohlížeč databáze'),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => DatabaseViewScreen()),
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.storage),
+                  title: const Text('Test SQL dotazu'),
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    testSQLQuery();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Testovací SQL dotaz byl proveden')),
+                    );
+                  },
+                ),
+              ],
             ),
             ListTile(
               leading: Icon(Icons.exit_to_app, color: Colors.redAccent),
@@ -705,35 +830,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
       body: isSyncing
-          ? Center(child: CircularProgressIndicator())
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text(
+                    'Načítání dat...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            )
           : ListView(
               padding: const EdgeInsets.all(16.0),
               children: [
+                const SizedBox(height: 16),
+                // In ListView children array, replace existing buttons with:
                 CustomButton(
                   icon: Icons.book,
                   text: 'Střelecký deník',
-                  color: Colors
-                      .teal, // Always use teal since ranges are handled in ShootingLogScreen
+                  color: Colors.teal,
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const ShootingLogScreen(),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-                CustomButton(
-                  icon: Icons.qr_code_scanner,
-                  text: 'Sklad',
-                  color: Colors.blueAccent,
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            const BarcodeScannerScreen(source: 'dashboard'),
+                        builder: (context) => ShootingLogsOverviewScreen(),
                       ),
                     );
                   },
@@ -742,7 +869,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 CustomButton(
                   icon: Icons.inventory_2,
                   text: 'Inventář nábojů',
-                  color: Colors.grey.shade700,
+                  color: Colors.blueGrey,
                   onPressed: () {
                     Navigator.push(
                       context,
@@ -754,28 +881,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             if (snapshot.connectionState ==
                                 ConnectionState.waiting) {
                               return const Scaffold(
-                                body:
-                                    Center(child: CircularProgressIndicator()),
-                              );
+                                  body: Center(
+                                      child: CircularProgressIndicator()));
                             }
-
                             if (snapshot.hasError) {
-                              print("Chyba v FutureBuilder: ${snapshot.error}");
                               return Scaffold(
                                 appBar: AppBar(
-                                  title: const Text('Inventář nábojů'),
-                                  backgroundColor: Colors.blueGrey,
-                                ),
+                                    title: const Text('Inventář nábojů')),
                                 body: Center(
-                                  child: Text(
-                                    'Chyba: ${snapshot.error}',
-                                    style: const TextStyle(
-                                        color: Colors.red, fontSize: 16),
-                                  ),
-                                ),
+                                    child: Text('Chyba: ${snapshot.error}')),
                               );
                             }
-
                             return FavoriteCartridgesScreen(
                               factoryCartridges:
                                   snapshot.data?['factory'] ?? [],
@@ -789,32 +905,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 16),
                 CustomButton(
-                  icon: Icons.visibility,
-                  text: 'Sklad komponent',
-                  color: Colors.blueGrey,
+                  icon: Icons.qr_code_scanner,
+                  text: 'Úprava zásob',
+                  color: Colors.blue,
                   onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => InventoryComponentsScreen(),
+                        builder: (context) =>
+                            const BarcodeScannerScreen(source: 'dashboard'),
                       ),
                     );
                   },
                 ),
                 const SizedBox(height: 16),
                 CustomButton(
-                  icon: Icons.camera_alt,
-                  text: 'Vyfotit terč',
-                  color: Colors.green,
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => TargetPhotoScreen(),
-                      ),
-                    );
-                  },
+                  icon: Icons.inventory,
+                  text: 'Sklad komponent',
+                  color: Colors.orange,
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const InventoryComponentsScreen(),
+                    ),
+                  ),
                 ),
+                if (isSyncing) ...[
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Probíhá synchronizace dat...',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blueGrey),
+                  ),
+                ],
               ],
             ),
     ));

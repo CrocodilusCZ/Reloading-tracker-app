@@ -8,7 +8,7 @@ import 'package:dio/dio.dart';
 
 class ApiService {
   //static const String baseUrl = 'http://10.0.2.2:8000/api';
-  //static const String baseUrl = 'http://10.20.0.89:8000/api';
+  //static const String baseUrl = 'http://192.168.0.21:8000/api';
   //static const String baseUrl = 'http://127.0.0.1:8000/api';
   //static const String baseUrl = 'http://10.20.0.69:8000/api';
   static final String baseUrl = 'https://www.reloading-tracker.cz/api';
@@ -191,6 +191,36 @@ class ApiService {
     }
   }
 
+  static Future<void> updateInventoryComponentQuantity(
+      int componentId, int newQuantity) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse(
+            '${baseUrl}/inventory-components/$componentId/update-quantity'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'quantity': newQuantity,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to update quantity: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Error updating quantity: $e');
+    }
+  }
+
   static Future<List<dynamic>> getUserWeapons() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? token = prefs.getString('api_token');
@@ -231,6 +261,36 @@ class ApiService {
     } catch (e) {
       print('Chyba při komunikaci s API: $e');
       rethrow;
+    }
+  }
+
+  //Monitoring skladové zásoby kalibrů
+  static Future<Map<String, dynamic>> toggleCaliberMonitoring(
+      int caliberId, bool isMonitored, int threshold) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found. Please login.');
+    }
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/calibers/toggle-monitor'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'caliber_id': caliberId,
+        'is_monitored': isMonitored,
+        'monitoring_threshold': threshold
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to toggle monitoring: ${response.statusCode}');
     }
   }
 
@@ -542,6 +602,28 @@ class ApiService {
     }
   }
 
+  // Načtení střeleckých logů
+  static Future<List<dynamic>> getShootingLogs() async {
+    try {
+      final dio = await _getDioInstance();
+      print(
+          'Fetching shooting logs from: ${dio.options.baseUrl}/shooting-logs');
+
+      final response = await dio.get('/shooting-logs');
+      print('Response status: ${response.statusCode}');
+      print('Response data: ${response.data}');
+
+      if (response.statusCode == 200) {
+        return response.data;
+      } else {
+        throw Exception('Failed to load logs: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching shooting logs: $e');
+      throw Exception('Failed to load shooting logs: $e');
+    }
+  }
+
   // Navýšení skladové zásoby náboje
   static Future<Map<String, dynamic>> increaseCartridge(
       int id, int quantity) async {
@@ -628,11 +710,11 @@ class ApiService {
   static Future<Map<String, dynamic>> createFactoryCartridge(
       Map<String, dynamic> cartridgeData) async {
     try {
-      final dbHelper = DatabaseHelper();
+      // Check connectivity first
       final connectivityResult = await Connectivity().checkConnectivity();
       final isOnline = connectivityResult != ConnectivityResult.none;
+      final dbHelper = DatabaseHelper();
 
-      // Try online first if available
       if (isOnline) {
         try {
           SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -660,31 +742,51 @@ class ApiService {
           }
         } catch (apiError) {
           print('API error, saving locally: $apiError');
+
+          // Save offline request for later sync
+          await dbHelper.addOfflineRequest(
+            'create_factory_cartridge',
+            cartridgeData,
+          );
+
+          // Insert into local SQLite for immediate use
+          final localCartridgeData = {
+            ...cartridgeData,
+            'cartridge_type': 'factory',
+            'synced': 0, // Mark as not synced
+          };
+
+          final id = await dbHelper.insertCartridge(localCartridgeData);
+          return {
+            'success': true,
+            'message': 'Cartridge saved locally',
+            'offline': true,
+            'id': id,
+          };
         }
+      } else {
+        // Offline flow - save locally
+        // Save offline request for later sync
+        await dbHelper.addOfflineRequest(
+          'create_factory_cartridge',
+          cartridgeData,
+        );
+
+        // Insert into local SQLite for immediate use
+        final localCartridgeData = {
+          ...cartridgeData,
+          'cartridge_type': 'factory',
+          'synced': 0, // Mark as not synced
+        };
+
+        final id = await dbHelper.insertCartridge(localCartridgeData);
+        return {
+          'success': true,
+          'message': 'Cartridge saved locally',
+          'offline': true,
+          'id': id,
+        };
       }
-
-      // Save locally if offline or API failed
-      print('Saving cartridge locally...');
-
-      // Save offline request for later sync
-      await dbHelper.addOfflineRequest(
-        'create_factory_cartridge',
-        cartridgeData,
-      );
-
-      // Insert into local SQLite
-      final localCartridgeData = {
-        ...cartridgeData,
-        'cartridge_type': 'factory',
-      };
-
-      final id = await dbHelper.insertCartridge(localCartridgeData);
-      return {
-        'success': true,
-        'message': 'Cartridge saved locally',
-        'offline': true,
-        'id': id,
-      };
     } catch (e) {
       print('Error creating factory cartridge: $e');
       throw Exception('Failed to save cartridge: $e');
@@ -797,6 +899,9 @@ class ApiService {
   static Future<Map<String, dynamic>> increaseStockByBarcode(
       String barcode, int quantity) async {
     try {
+      print(
+          'DEBUG: Starting stock increase for barcode: $barcode, quantity: $quantity');
+
       // 1. Get current data
       final dbHelper = DatabaseHelper();
       final cartridge = await dbHelper.getCartridgeByBarcode(barcode);
@@ -804,20 +909,12 @@ class ApiService {
         throw Exception('Náboj nebyl nalezen');
       }
 
-      // 2. Update local DB stock
-      final newStock = (cartridge['stock_quantity'] as int) + quantity;
-      await dbHelper.updateCartridgeStock(cartridge['id'], newStock);
-
-      // 3. Create offline request using new method
-      await dbHelper.addStockUpdateRequest(
-          {'id': cartridge['id'], 'quantity': quantity, 'barcode': barcode});
-
-      // Trigger sync immediately after offline request creation
-      await dbHelper.syncOfflineRequests();
-
-      // 4. Try immediate sync if online
+      // 2. Check if online
       final bool online = await isOnline();
+
       if (online) {
+        print('DEBUG: Device online, performing direct API update');
+        // Do online update first
         SharedPreferences prefs = await SharedPreferences.getInstance();
         String? token = prefs.getString('api_token');
 
@@ -838,9 +935,26 @@ class ApiService {
           throw Exception(
               'Failed to increase stock by barcode: ${response.statusCode}');
         }
-      }
 
-      return {'newStock': newStock};
+        // Update local DB after successful API call
+        final newStock = (cartridge['stock_quantity'] as int) + quantity;
+        await dbHelper.updateCartridgeStock(cartridge['id'], newStock);
+        print('DEBUG: Stock updated successfully to: $newStock');
+
+        return {'newStock': newStock};
+      } else {
+        print('DEBUG: Device offline, creating offline request');
+        // Offline flow
+        final newStock = (cartridge['stock_quantity'] as int) + quantity;
+        await dbHelper.updateCartridgeStock(cartridge['id'], newStock);
+
+        // Create offline request for later sync
+        await dbHelper.addStockUpdateRequest(
+            {'id': cartridge['id'], 'quantity': quantity, 'barcode': barcode});
+
+        print('DEBUG: Offline request created, stock updated to: $newStock');
+        return {'newStock': newStock};
+      }
     } catch (e) {
       print('Error increasing stock: $e');
       rethrow;
@@ -963,13 +1077,13 @@ class ApiService {
       baseUrl: baseUrl,
       headers: {
         'Accept': 'application/json',
-        'Content-Type': 'multipart/form-data',
+        'Content-Type': 'application/json', // Změněno z 'multipart/form-data'
       },
     ));
 
-    // Přidání auth tokenu pokud existuje
+    // Opraveno na správný klíč 'api_token'
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token');
+    final token = prefs.getString('api_token');
     if (token != null) {
       dio.options.headers['Authorization'] = 'Bearer $token';
     }
@@ -1001,6 +1115,12 @@ class ApiService {
     }
   }
 
+  static Future<List<dynamic>> getTargets() async {
+    final dio = await _getDioInstance();
+    final response = await dio.get('/targets');
+    return response.data;
+  }
+
   // Načtení aktivit uživatele
   static Future<List<dynamic>> getUserActivities() async {
     try {
@@ -1010,6 +1130,72 @@ class ApiService {
     } catch (e) {
       print('Chyba při načítání aktivit: $e');
       rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getUserProfile() async {
+    try {
+      final profileData = await _get('profile');
+      print(
+          'Loaded profile data for: ${profileData['name']}'); // Lepší logování
+      return profileData as Map<String, dynamic>;
+    } catch (e) {
+      print('Chyba při načítání profilu: $e');
+      rethrow;
+    }
+  }
+
+  static Future<int> updateComponentStock(
+      String type, int id, int quantity) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found');
+    }
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/$type/$id/update-stock'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({'quantity': quantity}),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['new_quantity'];
+    } else {
+      throw Exception('Failed to update stock');
+    }
+  }
+
+  static Future<int> increaseComponentStock(
+      String type, int id, int quantity) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? token = prefs.getString('api_token');
+
+    if (token == null) {
+      throw Exception('No token found');
+    }
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/$type/$id/increase-stock'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({'quantity': quantity}),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['new_quantity'];
+    } else {
+      throw Exception('Failed to increase stock');
     }
   }
 }

@@ -179,6 +179,50 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
     }
   }
 
+  Future<Map<String, dynamic>?> _fetchMonitoringStatus(int caliberId) async {
+    try {
+      // Quick return if we have fresh data
+      if (cartridgeDetails?['caliber'] != null) {
+        final caliber = cartridgeDetails!['caliber'];
+        return {
+          'is_monitored': caliber['is_monitored'] ?? false,
+          'monitoring_threshold': caliber['monitoring_threshold'] ?? 0
+        };
+      }
+
+      // Fallback - fetch fresh data
+      if (await isOnline()) {
+        final response = await ApiService.get('calibers/$caliberId');
+        if (response != null && response['success']) {
+          return {
+            'is_monitored': response['data']['is_monitored'] ?? false,
+            'monitoring_threshold':
+                response['data']['monitoring_threshold'] ?? 0
+          };
+        }
+      }
+      return null;
+    } catch (e) {
+      print('Error fetching monitoring status: $e');
+      return null;
+    }
+  }
+
+  Future<bool> _toggleMonitoring(
+      int caliberId, bool isMonitored, int threshold) async {
+    try {
+      if (await isOnline()) {
+        final response = await ApiService.toggleCaliberMonitoring(
+            caliberId, isMonitored, threshold);
+        return response['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      print('Error toggling monitoring: $e');
+      return false;
+    }
+  }
+
   Future<void> _fetchUserRanges() async {
     try {
       final rangesResponse = await ApiService.getUserRanges();
@@ -318,6 +362,289 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
     }
   }
 
+  Future<int> _getCaliberTotalStock(int caliberId) async {
+    print('Debug: Getting total stock for caliber ID: $caliberId');
+
+    try {
+      // Local DB query with better structure and debug
+      final db = await DatabaseHelper().database;
+
+      // First check if data exists
+      final checkData = await db.query(
+        'cartridges',
+        where: 'caliber_id = ?',
+        whereArgs: [caliberId],
+      );
+      print(
+          'Debug: Found ${checkData.length} cartridges for caliber $caliberId');
+
+      // Improved sum query
+      final result = await db.rawQuery('''
+      SELECT COALESCE(SUM(CAST(stock_quantity AS INTEGER)), 0) as total 
+      FROM cartridges 
+      WHERE caliber_id = ?
+    ''', [caliberId]);
+
+      final localTotal = result.first['total'];
+      print('Debug: SQL Result: $result');
+      print('Debug: Local total from DB: $localTotal');
+
+      // Convert to int safely
+      final parsedTotal =
+          localTotal == null ? 0 : int.tryParse(localTotal.toString()) ?? 0;
+      print('Debug: Parsed total: $parsedTotal');
+
+      // Try API only if online
+      if (await isOnline()) {
+        try {
+          final response =
+              await ApiService.get('/api/calibers/$caliberId/stock');
+          print('Debug: API Response for stock: $response');
+          if (response != null && response['total_stock'] != null) {
+            final apiTotal = response['total_stock'];
+            print('Debug: API total: $apiTotal');
+            return apiTotal;
+          }
+        } catch (apiError) {
+          print('Debug: API Error: $apiError');
+        }
+      }
+
+      return parsedTotal;
+    } catch (e) {
+      print('Error in _getCaliberTotalStock: $e');
+      return 0;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _getCaliberCartridges(
+      int caliberId) async {
+    try {
+      final db = await DatabaseHelper().database;
+
+      final cartridges = await db.rawQuery('''
+      SELECT 
+        id,
+        name, 
+        stock_quantity,
+        cartridge_type
+      FROM cartridges 
+      WHERE caliber_id = ? 
+      ORDER BY name
+    ''', [caliberId]);
+
+      print(
+          'Debug: Found ${cartridges.length} cartridges for caliber $caliberId');
+      print('Debug: Cartridge data: $cartridges');
+
+      return cartridges;
+    } catch (e) {
+      print('Error fetching caliber cartridges: $e');
+      return [];
+    }
+  }
+
+  Future<void> _showMonitoringDialog(
+      int caliberId, bool currentlyMonitored, int currentThreshold) async {
+    final thresholdController =
+        TextEditingController(text: currentThreshold.toString());
+    bool isMonitored = currentlyMonitored;
+
+    final totalStock = await _getCaliberTotalStock(caliberId);
+    final caliberName =
+        cartridgeDetails?['caliber']?['name'] ?? 'Neznámý kalibr';
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Monitorování kalibru $caliberName',
+                    style: const TextStyle(
+                      color: Colors.blueGrey,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Nastavte minimální množství pro všechny náboje tohoto kalibru',
+                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+              contentPadding: const EdgeInsets.all(24),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Stock info section
+                    Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Celková zásoba:',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                Text(
+                                  '$totalStock ks',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 24),
+                            const Text(
+                              'Rozpis nábojů:',
+                              style:
+                                  TextStyle(fontSize: 13, color: Colors.grey),
+                            ),
+                            const SizedBox(height: 8),
+                            FutureBuilder<List<Map<String, dynamic>>>(
+                              future: _getCaliberCartridges(caliberId),
+                              builder: (context, snapshot) {
+                                if (!snapshot.hasData) {
+                                  return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(8.0),
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  );
+                                }
+                                return Column(
+                                  children: snapshot.data!.map((cartridge) {
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 4),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              cartridge['name'],
+                                              style:
+                                                  const TextStyle(fontSize: 13),
+                                            ),
+                                          ),
+                                          Text(
+                                            '${cartridge['stock_quantity']} ks',
+                                            style:
+                                                const TextStyle(fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Monitoring controls
+                    Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        children: [
+                          SwitchListTile(
+                            title: const Text('Zapnout monitorování'),
+                            subtitle: const Text('Upozornění při nízkém stavu'),
+                            value: isMonitored,
+                            activeColor: Colors.blueGrey,
+                            onChanged: (value) =>
+                                setState(() => isMonitored = value),
+                          ),
+                          if (isMonitored) ...[
+                            const Divider(height: 1),
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: TextFormField(
+                                controller: thresholdController,
+                                decoration: InputDecoration(
+                                  labelText: 'Minimální množství',
+                                  suffix: const Text('ks'),
+                                  helperText:
+                                      'Zobrazit varování při poklesu pod tuto hodnotu',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: const BorderSide(
+                                        color: Colors.blueGrey),
+                                  ),
+                                ),
+                                keyboardType: TextInputType.number,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Zrušit'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final threshold =
+                        int.tryParse(thresholdController.text) ?? 100;
+                    final success = await _toggleMonitoring(
+                      caliberId,
+                      isMonitored,
+                      threshold,
+                    );
+                    if (success && context.mounted) {
+                      Navigator.pop(context,
+                          {'isMonitored': isMonitored, 'threshold': threshold});
+                    }
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.blueGrey,
+                  ),
+                  child: const Text('Uložit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cartridge = cartridgeDetails ??
@@ -351,8 +678,35 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
 
                       // Sekce: Kalibr a výrobce
                       _buildSectionTitle('Kalibr a Výrobce'),
-                      _buildStripedInfoRow('Kalibr',
-                          cartridge['caliber']?['name'] ?? 'Neznámý', 0),
+                      FutureBuilder<Map<String, dynamic>?>(
+                        future:
+                            _fetchMonitoringStatus(cartridge['caliber']?['id']),
+                        builder: (context, snapshot) {
+                          final isMonitored =
+                              snapshot.data?['is_monitored'] ?? false;
+                          final threshold =
+                              snapshot.data?['monitoring_threshold'] ?? 100;
+
+                          return _buildStripedInfoRow(
+                            'Kalibr',
+                            cartridge['caliber']?['name'] ?? 'Neznámý',
+                            0,
+                            icon: GestureDetector(
+                              onTap: () => _showMonitoringDialog(
+                                cartridge['caliber']?['id'],
+                                isMonitored,
+                                threshold,
+                              ),
+                              child: Icon(
+                                isMonitored
+                                    ? Icons.notifications_active
+                                    : Icons.notifications_off,
+                                color: isMonitored ? Colors.green : Colors.grey,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
                       if (cartridge['type'] == 'factory') // Přidaná podmínka
                         _buildStripedInfoRow('Výrobce',
                             cartridge['manufacturer'] ?? 'Neznámý', 1),
@@ -482,8 +836,10 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: isLoading ? null : _showIncreaseStockDialog,
-                  icon: const Icon(Icons.add_shopping_cart, size: 20),
-                  label: const Text('Navýšit zásobu'),
+                  icon: const Icon(Icons.inventory,
+                      size: 20), // Changed from add_shopping_cart
+                  label: const Text(
+                      'Upravit zásobu'), // Changed from 'Navýšit zásobu'
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueGrey[700],
                     foregroundColor: Colors.white,
@@ -546,119 +902,195 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
 
   void _showIncreaseStockDialog() {
     TextEditingController quantityController = TextEditingController();
+    bool isIncrease = true;
 
-    showDialog(
+    showDialog<Map<String, dynamic>?>(
       context: context,
       builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: Text('Navýšit zásobu pro ${widget.cartridge['name']}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: quantityController,
-                keyboardType: TextInputType.number,
-                textInputAction: TextInputAction.done,
-                decoration:
-                    const InputDecoration(labelText: 'Zadejte množství'),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text('Upravit zásobu pro ${widget.cartridge['name']}'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  ElevatedButton(
-                    onPressed: () {
-                      int currentValue =
-                          int.tryParse(quantityController.text) ?? 0;
-                      quantityController.text = (currentValue + 1).toString();
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: true, label: Text('Přidat')),
+                      ButtonSegment(value: false, label: Text('Odebrat')),
+                    ],
+                    selected: {isIncrease},
+                    onSelectionChanged: (Set<bool> newValue) {
+                      setDialogState(() => isIncrease = newValue.first);
                     },
-                    child: const Text('+1'),
                   ),
-                  ElevatedButton(
-                    onPressed: () {
-                      int currentValue =
-                          int.tryParse(quantityController.text) ?? 0;
-                      quantityController.text = (currentValue + 10).toString();
-                    },
-                    child: const Text('+10'),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: quantityController,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    decoration:
+                        const InputDecoration(labelText: 'Zadejte množství'),
                   ),
-                  ElevatedButton(
-                    onPressed: () {
-                      int currentValue =
-                          int.tryParse(quantityController.text) ?? 0;
-                      quantityController.text = (currentValue + 100).toString();
-                    },
-                    child: const Text('+100'),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      for (final amount in [1, 10, 100])
+                        ElevatedButton(
+                          onPressed: () {
+                            final currentValue =
+                                int.tryParse(quantityController.text) ?? 0;
+                            quantityController.text =
+                                (currentValue + amount).toString();
+                          },
+                          child: Text('+$amount'),
+                        ),
+                    ],
                   ),
                 ],
               ),
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () async {
-                int quantity = int.tryParse(quantityController.text) ?? 0;
-                Navigator.pop(dialogContext);
-                if (quantity > 0) {
-                  final cartridgeId = widget.cartridge['id'];
-                  print(
-                      'Navýšení zásob: ID: $cartridgeId, Množství: $quantity');
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Zrušit'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    final quantity = int.tryParse(quantityController.text) ?? 0;
+                    if (quantity <= 0) return;
 
-                  bool online = await isOnline();
-                  if (online) {
-                    try {
-                      final response = await ApiService.increaseCartridge(
-                          cartridgeId, quantity);
-                      if (response.containsKey('newStock')) {
-                        setState(() {
-                          cartridgeDetails?['stock_quantity'] =
-                              response['newStock'];
-                          widget.cartridge['stock_quantity'] =
-                              response['newStock'];
-                        });
-                        scaffoldMessengerKey.currentState?.showSnackBar(
-                          SnackBar(
-                              content: Text(
-                                  'Skladová zásoba aktualizována na ${response['newStock']} ks.')),
-                        );
-                        await _fetchData();
-                      }
-                    } catch (e) {
-                      print('Chyba při navýšení zásob: $e');
-                      await DatabaseHelper()
-                          .updateStockOffline(cartridgeId, quantity);
-                      scaffoldMessengerKey.currentState?.showSnackBar(
-                        const SnackBar(
-                            content: Text(
-                                'Změna skladu uložena pro pozdější synchronizaci')),
-                      );
-                    }
-                  } else {
-                    // Offline mode - use updateStockOffline directly
-                    await DatabaseHelper()
-                        .updateStockOffline(cartridgeId, quantity);
-                    scaffoldMessengerKey.currentState?.showSnackBar(
-                      const SnackBar(
-                          content: Text(
-                              'Změna skladu uložena pro pozdější synchronizaci')),
-                    );
-                  }
-                } else {
-                  print('Neplatné množství pro navýšení zásob: $quantity');
-                }
-              },
-              child: const Text('OK'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext); // Zavření dialogu
-              },
-              child: const Text('Zrušit'),
-            ),
-          ],
+                    Navigator.pop(dialogContext, {
+                      'quantity': quantity,
+                      'isIncrease': isIncrease,
+                    });
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
         );
       },
-    );
+    ).then((result) async {
+      if (result == null) return;
+
+      final quantity = result['quantity'] as int;
+      final isIncrease = result['isIncrease'] as bool;
+      final adjustedQuantity = isIncrease ? quantity : -quantity;
+      final cartridgeId = widget.cartridge['id'];
+
+      if (!mounted) return;
+
+      if (await isOnline()) {
+        try {
+          final response =
+              await ApiService.increaseCartridge(cartridgeId, adjustedQuantity);
+
+          if (!mounted) return;
+
+          if (response != null && response.containsKey('newStock')) {
+            setState(() {
+              cartridgeDetails?['stock_quantity'] = response['newStock'];
+              widget.cartridge['stock_quantity'] = response['newStock'];
+            });
+
+            scaffoldMessengerKey.currentState?.showSnackBar(
+              SnackBar(
+                content: Text(
+                    'Skladová zásoba aktualizována na ${response['newStock']} ks.'),
+                duration: const Duration(seconds: 3),
+              ),
+            );
+
+            if (response['warning'] != null) {
+              final warning = response['warning'];
+              if (warning['type'] == 'low_stock') {
+                await Future.delayed(const Duration(seconds: 1));
+
+                final cartridgesList = (warning['cartridges'] as List)
+                    .map((c) => '${c['name']}: ${c['stock']} ks')
+                    .join('\n');
+
+                scaffoldMessengerKey.currentState?.showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        const Icon(Icons.warning_amber, color: Colors.white),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(warning['message']),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Celkem nábojů: ${warning['current_total']} ks (limit: ${warning['threshold']} ks)',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                cartridgesList,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    backgroundColor: Colors.orange,
+                    duration: const Duration(seconds: 5),
+                    behavior: SnackBarBehavior.floating,
+                    margin: const EdgeInsets.all(8),
+                  ),
+                );
+              }
+            }
+            return; // Success - exit early
+          }
+
+          throw Exception('API nevrátilo platnou odpověď');
+        } catch (e) {
+          print('Chyba při úpravě zásob: $e');
+          if (!mounted) return;
+
+          scaffoldMessengerKey.currentState?.showSnackBar(
+            const SnackBar(content: Text('Chyba při komunikaci se serverem')),
+          );
+          return; // Error - don't create offline request
+        }
+      }
+
+      // Handle truly offline mode
+      final currentStock = cartridgeDetails?['stock_quantity'] ??
+          widget.cartridge['stock_quantity'] ??
+          0;
+      final newStock = currentStock + adjustedQuantity;
+
+      setState(() {
+        cartridgeDetails?['stock_quantity'] = newStock;
+        widget.cartridge['stock_quantity'] = newStock;
+      });
+
+      try {
+        await DatabaseHelper().addOfflineRequest(
+          'update_stock',
+          {'id': cartridgeId, 'quantity': adjustedQuantity},
+        );
+
+        scaffoldMessengerKey.currentState?.showSnackBar(
+          const SnackBar(
+              content: Text('Změna skladu uložena pro pozdější synchronizaci')),
+        );
+      } catch (error) {
+        print('Chyba při ukládání offline požadavku: $error');
+        scaffoldMessengerKey.currentState?.showSnackBar(
+          const SnackBar(
+              content: Text('Chyba při ukládání změny skladu offline')),
+        );
+      }
+    });
   }
 
   Future<void> _showShootingLogForm(BuildContext context) async {
@@ -759,9 +1191,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
+                  onPressed: () => Navigator.pop(context),
                   child: const Text('Zrušit'),
                 ),
                 TextButton(
@@ -771,8 +1201,7 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
                         dateController.text.isEmpty) {
                       scaffoldMessengerKey.currentState?.showSnackBar(
                         const SnackBar(
-                          content: Text('Vyplňte všechna povinná pole!'),
-                        ),
+                            content: Text('Vyplňte všechna povinná pole!')),
                       );
                       return;
                     }
@@ -798,61 +1227,98 @@ class _CartridgeDetailScreenState extends State<CartridgeDetailScreen> {
 
                         if (response != null && response['success'] == true) {
                           print('Záznam úspěšně vytvořen: $response');
+
+                          // Success message
                           scaffoldMessengerKey.currentState?.showSnackBar(
                             const SnackBar(
                               content: Text(
                                   'Záznam byl úspěšně uložen do střeleckého deníku.'),
+                              duration: Duration(seconds: 3),
                             ),
                           );
+
+                          // Show warning only if it exists and is not null
+                          if (response['warning'] != null) {
+                            final warning = response['warning'];
+                            if (warning['type'] == 'low_stock') {
+                              await Future.delayed(const Duration(seconds: 1));
+
+                              final cartridgesList = (warning['cartridges']
+                                      as List)
+                                  .map((c) => '${c['name']}: ${c['stock']} ks')
+                                  .join('\n');
+
+                              scaffoldMessengerKey.currentState?.showSnackBar(
+                                SnackBar(
+                                  content: Row(
+                                    children: [
+                                      const Icon(Icons.warning_amber,
+                                          color: Colors.white),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(warning['message']),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Celkem nábojů: ${warning['current_total']} ks (limit: ${warning['threshold']} ks)',
+                                              style:
+                                                  const TextStyle(fontSize: 12),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              cartridgesList,
+                                              style:
+                                                  const TextStyle(fontSize: 12),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  backgroundColor: Colors.orange,
+                                  duration: const Duration(seconds: 5),
+                                  behavior: SnackBarBehavior.floating,
+                                  margin: const EdgeInsets.all(8),
+                                ),
+                              );
+                            }
+                          }
+                          return; // Success - exit early
                         } else {
                           throw Exception('API nevrátilo úspěšnou odpověď.');
                         }
                       } catch (e) {
                         print('Chyba při odesílání záznamu: $e');
-
-                        try {
-                          await DatabaseHelper().addOfflineRequest(
-                            'create_shooting_log',
-                            shootingLogData,
-                          );
-                          print(
-                              'Požadavek byl úspěšně uložen do offline_requests.');
-
-                          scaffoldMessengerKey.currentState?.showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                  'Záznam byl uložen pro pozdější synchronizaci.'),
-                            ),
-                          );
-                        } catch (error) {
-                          print('Chyba při ukládání požadavku offline: $error');
-                        }
+                        // Fall through to offline handling
                       }
-                    } else {
-                      print('Offline režim: Ukládám požadavek lokálně.');
-                      try {
-                        await DatabaseHelper().addOfflineRequest(
-                          'create_shooting_log',
-                          shootingLogData,
-                        );
-                        print(
-                            'Požadavek byl úspěšně uložen do offline_requests.');
+                    }
 
-                        scaffoldMessengerKey.currentState?.showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                                'Záznam byl uložen pro pozdější synchronizaci.'),
-                          ),
-                        );
-                      } catch (error) {
-                        print('Chyba při ukládání požadavku offline: $error');
-                        scaffoldMessengerKey.currentState?.showSnackBar(
-                          const SnackBar(
-                            content:
-                                Text('Chyba při ukládání záznamu offline.'),
-                          ),
-                        );
-                      }
+// Handle offline mode or API errors
+                    print('Offline režim: Ukládám požadavek lokálně.');
+                    try {
+                      await DatabaseHelper().addOfflineRequest(
+                        'create_shooting_log',
+                        shootingLogData,
+                      );
+                      print(
+                          'Požadavek byl úspěšně uložen do offline_requests.');
+                      scaffoldMessengerKey.currentState?.showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Záznam byl uložen pro pozdější synchronizaci.'),
+                        ),
+                      );
+                    } catch (error) {
+                      print('Chyba při ukládání požadavku offline: $error');
+                      scaffoldMessengerKey.currentState?.showSnackBar(
+                        const SnackBar(
+                          content: Text('Chyba při ukládání záznamu offline.'),
+                        ),
+                      );
                     }
                   },
                   child: const Text('Uložit'),

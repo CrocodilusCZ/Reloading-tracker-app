@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:ui' as ui;
 import 'package:vector_math/vector_math_64.dart' as vector;
+import 'package:share_plus/share_plus.dart';
+import 'package:cross_file/cross_file.dart';
 
 enum EditMode { calibration, shots, none }
 
@@ -36,12 +38,14 @@ class MoaMeasurementData {
   final List<Group> groups;
   final List<Offset> calibrationPoints;
   final double calibrationValue; // mm
+  final double? distance;
 
   MoaMeasurementData({
     required this.originalImagePath,
     required this.groups,
     required this.calibrationPoints,
     required this.calibrationValue,
+    this.distance,
   });
 
   Map<String, dynamic> toJson() => {
@@ -51,7 +55,8 @@ class MoaMeasurementData {
           'points':
               calibrationPoints.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
           'value_mm': calibrationValue
-        }
+        },
+        'distance': distance,
       };
 }
 
@@ -108,8 +113,31 @@ class MoaPainter extends CustomPainter {
         );
       }
 
-      // Draw points
       for (var point in calibrationPoints) {
+        final isSelected = point == selectedPoint;
+
+        // Draw highlight for selected point
+        if (isSelected) {
+          // Yellow highlight background stays same
+          canvas.drawCircle(
+            point,
+            circleRadius * 4,
+            Paint()
+              ..color = Colors.yellow.withOpacity(0.3)
+              ..style = PaintingStyle.fill,
+          );
+          // Red border for selected calibration point for better contrast with blue
+          canvas.drawCircle(
+            point,
+            circleRadius * 2.5,
+            Paint()
+              ..color = Colors.red // Changed from blue to red
+              ..strokeWidth = strokeWidth
+              ..style = PaintingStyle.stroke,
+          );
+        }
+
+        // Draw regular calibration point (stays blue)
         canvas.drawCircle(
           point,
           circleRadius * 2,
@@ -117,7 +145,7 @@ class MoaPainter extends CustomPainter {
         );
         canvas.drawCircle(
           point,
-          circleRadius, // Zmenšeno z 2
+          circleRadius,
           calibrationPaint..style = PaintingStyle.fill,
         );
       }
@@ -237,12 +265,156 @@ class MoaPainter extends CustomPainter {
   }
 }
 
+class CalibrationFlow extends StatefulWidget {
+  final double? initialDistance;
+  final Function(double referenceLength, double distance) onComplete;
+  final Function(Offset) onCalibrationPointTap;
+  final int calibrationPointsCount;
+
+  const CalibrationFlow({
+    Key? key,
+    this.initialDistance,
+    required this.onComplete,
+    required this.onCalibrationPointTap,
+    required this.calibrationPointsCount,
+  }) : super(key: key);
+
+  @override
+  _CalibrationFlowState createState() => _CalibrationFlowState();
+}
+
+class _CalibrationFlowState extends State<CalibrationFlow> {
+  final TextEditingController referenceLengthController =
+      TextEditingController(text: '25.4');
+  final TextEditingController distanceController = TextEditingController();
+  int _step = 0;
+
+  void _confirmCalibrationPoints(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('Potvrzení kalibrace'),
+        content: Text('Jsou kalibrační body správně označeny?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Zavře potvrzovací dialog
+              // Reset kalibračních bodů
+              widget.onCalibrationPointTap(Offset.zero); // Reset points
+            },
+            child: Text('Označit znovu'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Zavře potvrzovací dialog
+              setState(() => _step = 2); // Přejde na dialog vzdálenosti
+            },
+            child: Text('Potvrdit'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_getTitleForStep()),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_step == 0) ...[
+            Text(
+                'Pro přesné měření potřebujeme znát referenční vzdálenost na terči.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: referenceLengthController,
+              decoration: InputDecoration(
+                labelText: 'Referenční vzdálenost (mm)',
+                helperText: 'Např. 1 inch = 25.4 mm',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+            ),
+          ] else if (_step == 1) ...[
+            Text(
+                'Nyní označte na terči dva body odpovídající zadané vzdálenosti.'),
+            Text('(${widget.calibrationPointsCount}/2 bodů)'),
+            if (widget.calibrationPointsCount == 2)
+              ElevatedButton(
+                onPressed: () => _confirmCalibrationPoints(context),
+                child: Text('Pokračovat'),
+              ),
+          ] else if (_step == 2) ...[
+            Text('Zadejte vzdálenost ke střelecké pozici.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: distanceController,
+              decoration: InputDecoration(
+                labelText: 'Vzdálenost k terči (m)',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        if (_step > 0)
+          TextButton(
+            onPressed: () => setState(() => _step--),
+            child: Text('Zpět'),
+          ),
+        if (_step == 0)
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              setState(() => _step++);
+            },
+            child: Text('Začít označování'),
+          ),
+        if (_step == 2)
+          ElevatedButton(
+            onPressed: () {
+              final referenceLength =
+                  double.parse(referenceLengthController.text);
+              final distance = double.parse(distanceController.text);
+              widget.onComplete(referenceLength, distance);
+              Navigator.of(context).pop();
+            },
+            child: Text('Dokončit'),
+          ),
+      ],
+    );
+  }
+
+  String _getTitleForStep() {
+    switch (_step) {
+      case 0:
+        return 'Kalibrace měření (1/3)';
+      case 1:
+        return 'Kalibrace měření (2/3)';
+      case 2:
+        return 'Kalibrace měření (3/3)';
+      default:
+        return 'Kalibrace měření';
+    }
+  }
+}
+
 class MoaMeasurementScreen extends StatefulWidget {
   final File imageFile;
+  final String? weaponName; // Add this
+  final String? cartridgeName; // Add this
+  final double? distance;
 
   const MoaMeasurementScreen({
     Key? key,
     required this.imageFile,
+    this.weaponName, // Add this
+    this.cartridgeName, // Add this
+    this.distance, // Add this
   }) : super(key: key);
 
   @override
@@ -288,6 +460,7 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
   Map<int, GroupStats> _groupStats = {};
   bool _showGroupStats = true;
   final GlobalKey _imageKey = GlobalKey();
+  bool _showCalibrationFlow = true;
 
   @override
   void dispose() {
@@ -295,6 +468,46 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
     calibrationController.dispose();
     distanceController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showCalibrationDialog();
+    });
+  }
+
+  void _showCalibrationDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => CalibrationFlow(
+        initialDistance: widget.distance,
+        calibrationPointsCount: _calibrationPoints.length,
+        onCalibrationPointTap: (point) {
+          // Když se zavře první dialog, začneme poslouchat kliky
+          if (_calibrationPoints.length < 2) {
+            setState(() {
+              _calibrationPoints.add(point);
+              if (_calibrationPoints.length == 2) {
+                // Po druhém bodu otevřít poslední dialog
+                _showDistanceDialog();
+              }
+            });
+          }
+        },
+        onComplete: (referenceLength, distance) {
+          setState(() {
+            calibrationController.text = referenceLength.toString();
+            distanceController.text = distance.toString();
+            _currentMode = EditMode.shots;
+            _showCalibrationFlow = false;
+          });
+        },
+      ),
+    );
   }
 
   void _handleZoomIn() {
@@ -556,25 +769,28 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
       switch (_currentMode) {
         case EditMode.calibration:
           if (_calibrationPoints.length < 2) {
-            _saveToHistory(); // Save state before adding point
+            _saveToHistory();
             _calibrationPoints.add(details.localPosition);
             if (_calibrationPoints.length == 2) {
-              _calibrationComplete = true;
-              _currentMode = EditMode.shots;
-              if (distanceController.text.isNotEmpty) {
-                _updateMoaCalculation(distanceController.text);
-                setState(() => _showDistanceInput = false);
-              }
+              // Po druhém bodu zapnout edit mode a zobrazit instrukce
+              _isEditMode = true;
+              _showCalibrationConfirmDialog();
             }
           }
           break;
 
         case EditMode.shots:
-          _saveToHistory(); // Save state before adding shot
-          _shotGroups[_currentGroupIndex].add(details.localPosition);
-          if (distanceController.text.isNotEmpty) {
+          if (_calibrationComplete && distanceController.text.isNotEmpty) {
+            _saveToHistory();
+            _shotGroups[_currentGroupIndex].add(details.localPosition);
             _updateMoaCalculation(distanceController.text);
             _moaValues[_currentGroupIndex] = _moaValue ?? 0.0;
+          } else if (!_calibrationComplete) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Nejdřív dokončete kalibraci')),
+            );
+          } else {
+            _showDistanceDialog(); // Show dialog if distance is not set
           }
           break;
 
@@ -582,6 +798,40 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
           break;
       }
     });
+  }
+
+  void _showCalibrationConfirmDialog() {
+    // Odstranit původní dialog a místo něj:
+
+    // Zobrazit trvalý SnackBar s instrukcemi a tlačítkem
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: Duration(days: 1), // Prakticky nekonečné zobrazení
+        content: Row(
+          children: [
+            Expanded(
+              child: Text(
+                  'Upravte pozice bodů tažením. Po dokončení stiskněte Potvrdit.'),
+            ),
+            TextButton(
+              onPressed: () {
+                // Zavřít SnackBar
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                setState(() {
+                  _isEditMode = false;
+                  _calibrationComplete = true;
+                });
+                _showDistanceDialog();
+              },
+              child: Text(
+                'POTVRDIT',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _handlePanStart(DragStartDetails details) {
@@ -658,6 +908,43 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
         }
       });
     }
+  }
+
+  void _showDistanceDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('Zadejte vzdálenost'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Zadejte vzdálenost ke střelecké pozici.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: distanceController,
+              decoration: InputDecoration(
+                labelText: 'Vzdálenost k terči (m)',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              setState(() {
+                _currentMode = EditMode.shots;
+                _showCalibrationFlow = false;
+              });
+            },
+            child: Text('Dokončit'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _updateMoaCalculation(String distance) {
@@ -754,7 +1041,7 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
 
   Widget _buildModeControls() {
     return Positioned(
-      top: 16,
+      top: 8,
       right: 16,
       child: Card(
         color: Colors.white.withOpacity(0.9),
@@ -810,90 +1097,128 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
         padding: const EdgeInsets.all(8.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Mode selection buttons
-            // In the mode selection buttons Row
+            // Group controls - Add new group button with label
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.straighten),
-                  onPressed: () =>
-                      setState(() => _currentMode = EditMode.calibration),
-                  color: _currentMode == EditMode.calibration
-                      ? Colors.blue
-                      : Colors.grey,
-                  tooltip: 'Kalibrace vzdálenosti',
-                ),
-                // Add green check icon when calibration is complete
-                if (_calibrationPoints.length == 2)
-                  const Icon(
-                    Icons.check_circle,
-                    color: Colors.green,
-                    size: 16,
+                InkWell(
+                  onTap: () => setState(() {
+                    _shotGroups.add([]);
+                    _currentGroupIndex = _shotGroups.length - 1;
+                  }),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.add_circle_outline,
+                          color: Colors.blue,
+                          size: 28,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Nová\nskupina',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.blue,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                IconButton(
-                  icon: const Icon(Icons.add_location),
-                  onPressed: () =>
-                      setState(() => _currentMode = EditMode.shots),
-                  color: _currentMode == EditMode.shots
-                      ? Colors.blue
-                      : Colors.grey,
-                  tooltip: 'Označit zásahy',
                 ),
+                // Group selector dropdown
+                if (_shotGroups.length > 1)
+                  DropdownButton<int>(
+                    value: _currentGroupIndex,
+                    items: _shotGroups.asMap().entries.map((e) {
+                      return DropdownMenuItem(
+                        value: e.key,
+                        child: Text('Skupina ${e.key + 1}'),
+                      );
+                    }).toList(),
+                    onChanged: (index) =>
+                        setState(() => _currentGroupIndex = index!),
+                  ),
               ],
             ),
 
-            // Group controls
-            if (_currentMode == EditMode.shots) ...[
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.add_circle_outline),
-                    onPressed: () => setState(() {
-                      _shotGroups.add([]);
-                      _currentGroupIndex = _shotGroups.length - 1;
-                    }),
-                    tooltip: 'Nová skupina',
-                  ),
-                  if (_shotGroups.length > 1)
-                    DropdownButton<int>(
-                      value: _currentGroupIndex,
-                      items: _shotGroups.asMap().entries.map((e) {
-                        return DropdownMenuItem(
-                          value: e.key,
-                          child: Text('Skupina ${e.key + 1}'),
-                        );
-                      }).toList(),
-                      onChanged: (index) =>
-                          setState(() => _currentGroupIndex = index!),
+            // Current group stats
+            if (_shotGroups[_currentGroupIndex].isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.only(top: 8.0),
+                child: Divider(height: 1),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Skupina ${_currentGroupIndex + 1}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
                     ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      'Zásahů: ${_shotGroups[_currentGroupIndex].length}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    if (_moaValues.containsKey(_currentGroupIndex))
+                      Text(
+                        'MOA: ${_moaValues[_currentGroupIndex]!.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ],
 
-            // Current group info
-            if (_shotGroups[_currentGroupIndex].isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text('Skupina ${_currentGroupIndex + 1}:'),
-              Text('Počet zásahů: ${_shotGroups[_currentGroupIndex].length}'),
-              if (_moaValues.containsKey(_currentGroupIndex))
-                Text(
-                  'MOA: ${_moaValues[_currentGroupIndex]!.toStringAsFixed(2)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-            ],
-
-            TextButton(
-              onPressed: () => setState(() {
-                _shotGroups = [[]];
-                _currentGroupIndex = 0;
-                _moaValues.clear();
-                _calibrationPoints.clear();
-                _currentMode = EditMode.calibration;
-              }),
-              child: Text('Reset'),
+            // Reset button
+            TextButton.icon(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Potvrdit reset'),
+                    content: const Text(
+                        'Opravdu chcete začít znovu?\nVšechny skupiny nástřelů budou smazány.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Zrušit'),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          setState(() {
+                            _shotGroups = [[]];
+                            _currentGroupIndex = 0;
+                            _moaValues.clear();
+                            _calibrationPoints.clear();
+                            _currentMode = EditMode.calibration;
+                          });
+                        },
+                        child: const Text('Reset',
+                            style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              icon: const Icon(Icons.refresh, size: 16, color: Colors.red),
+              label: const Text('Reset',
+                  style: TextStyle(fontSize: 12, color: Colors.red)),
             ),
           ],
         ),
@@ -928,9 +1253,22 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
                 : null,
           ),
           IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: _saveAnnotatedImage,
-            tooltip: 'Uložit s anotacemi',
+            icon: const Icon(Icons.share),
+            onPressed: () async {
+              try {
+                final annotatedImage = await _createAnnotatedImage();
+                await Share.shareXFiles(
+                  [XFile(annotatedImage.path)],
+                  text: 'MOA měření',
+                  subject: 'Sdílení výsledků střelby',
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Chyba při sdílení: $e')),
+                );
+              }
+            },
+            tooltip: 'Sdílet s anotacemi',
           ),
         ],
       ),
@@ -963,17 +1301,48 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
                       children: [
                         Image.file(
                           widget.imageFile,
-                          key: _imageKey, // Přidáme GlobalKey
+                          key: _imageKey,
                           fit: BoxFit.contain,
                         ),
                         Positioned.fill(
                           child: GestureDetector(
+                            // Tap to add points in non-edit mode
                             onTapDown: !_isEditMode ? _handleTap : null,
-                            onPanStart: _isEditMode ? _handlePanStart : null,
-                            onPanUpdate: _isEditMode ? _handlePanUpdate : null,
-                            onPanEnd: _isEditMode
+
+                            // Long press to select point in edit mode
+                            onLongPressStart: _isEditMode
+                                ? (LongPressStartDetails details) {
+                                    _handlePanStart(DragStartDetails(
+                                      localPosition: details.localPosition,
+                                      globalPosition: details.globalPosition,
+                                    ));
+                                  }
+                                : null,
+
+                            // Handle point dragging when selected
+                            onScaleStart: _isEditMode && _selectedPoint != null
+                                ? (ScaleStartDetails details) {
+                                    _handlePanStart(DragStartDetails(
+                                      localPosition: details.localFocalPoint,
+                                      globalPosition: details.focalPoint,
+                                    ));
+                                  }
+                                : null,
+
+                            onScaleUpdate: _isEditMode && _selectedPoint != null
+                                ? (ScaleUpdateDetails details) {
+                                    _handlePanUpdate(DragUpdateDetails(
+                                      localPosition: details.localFocalPoint,
+                                      globalPosition: details.focalPoint,
+                                      delta: details.focalPointDelta,
+                                    ));
+                                  }
+                                : null,
+
+                            onScaleEnd: _isEditMode && _selectedPoint != null
                                 ? (_) => setState(() => _selectedPoint = null)
                                 : null,
+
                             child: CustomPaint(
                               painter: MoaPainter(
                                 shotGroups: _shotGroups,
@@ -983,7 +1352,7 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
                                 hideCalibration: false,
                                 groupStats: _groupStats,
                                 showStats: _showGroupStats,
-                                displaySize: displaySize, // Pass actual size
+                                displaySize: displaySize,
                               ),
                             ),
                           ),
@@ -996,98 +1365,199 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
             },
           ),
 
+          // MOA Controls on left
+          Positioned(
+            top: 8,
+            left: 16,
+            child: _buildMoaControls(),
+          ),
+
+          // Mode selection controls
           // Mode selection controls
           Positioned(
-            top: 16,
+            top: 8,
             right: 16,
             child: Card(
               color: Colors.white.withOpacity(0.9),
               child: Padding(
-                padding: const EdgeInsets.all(8.0),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
                 child: Column(
-                  // Změna z Row na Column
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Horní řada ikon s popisky
                     Row(
-                      // Původní tlačítka v Row
                       mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.add_circle),
-                          onPressed: () {
+                        // Přidávání bodů
+                        InkWell(
+                          onTap: () {
                             HapticFeedback.selectionClick();
                             setState(() => _isEditMode = false);
                           },
-                          color: !_isEditMode ? Colors.blue : Colors.grey,
-                          tooltip: 'Přidat vstřely',
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8.0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.add_circle,
+                                  color:
+                                      !_isEditMode ? Colors.blue : Colors.grey,
+                                  size: 28,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Přidat',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: !_isEditMode
+                                        ? Colors.blue
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () {
+                        // Editace bodů
+                        InkWell(
+                          onTap: () {
                             HapticFeedback.selectionClick();
                             setState(() => _isEditMode = true);
                           },
-                          color: _isEditMode ? Colors.blue : Colors.grey,
-                          tooltip: 'Upravit vstřely',
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8.0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.edit,
+                                  color:
+                                      _isEditMode ? Colors.blue : Colors.grey,
+                                  size: 28,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Upravit',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color:
+                                        _isEditMode ? Colors.blue : Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        IconButton(
-                          icon: Icon(_showGroupStats
-                              ? Icons.visibility
-                              : Icons.visibility_off),
-                          onPressed: () {
+                        // Statistiky
+                        InkWell(
+                          onTap: () {
                             HapticFeedback.selectionClick();
                             setState(() => _showGroupStats = !_showGroupStats);
                           },
-                          color: _showGroupStats ? Colors.blue : Colors.grey,
-                          tooltip: 'Zobrazit/skrýt statistiky',
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8.0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _showGroupStats
+                                      ? Icons.visibility
+                                      : Icons.visibility_off,
+                                  color: _showGroupStats
+                                      ? Colors.blue
+                                      : Colors.grey,
+                                  size: 28,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _showGroupStats ? 'Skrýt' : 'Ukázat',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: _showGroupStats
+                                        ? Colors.blue
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                    // Přidaný dropdown pro body v edit módu
+                    // Editační sekce
                     if (_isEditMode &&
                         _shotGroups[_currentGroupIndex].isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          DropdownButton<int>(
-                            hint: const Text('Vybrat bod'),
-                            value: _selectedPoint != null
-                                ? _shotGroups[_currentGroupIndex]
-                                    .indexOf(_selectedPoint!)
-                                : null,
-                            items: List.generate(
-                              _shotGroups[_currentGroupIndex].length,
-                              (index) => DropdownMenuItem(
-                                value: index,
-                                child: Text('Bod ${index + 1}'),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8.0),
+                        child: Divider(height: 1),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Bod:', style: TextStyle(fontSize: 12)),
+                            const SizedBox(width: 4),
+                            SizedBox(
+                              width: 80,
+                              child: DropdownButton<int>(
+                                isExpanded: true,
+                                hint: const Text('Vybrat',
+                                    style: TextStyle(fontSize: 12)),
+                                value: _selectedPoint != null
+                                    ? (_shotGroups[_currentGroupIndex]
+                                                .indexOf(_selectedPoint!) !=
+                                            -1
+                                        ? _shotGroups[_currentGroupIndex]
+                                            .indexOf(_selectedPoint!)
+                                        : null)
+                                    : null,
+                                items: List.generate(
+                                  _shotGroups[_currentGroupIndex].length,
+                                  (index) => DropdownMenuItem(
+                                    value: index,
+                                    child: Text('${index + 1}',
+                                        style: const TextStyle(fontSize: 12)),
+                                  ),
+                                ),
+                                onChanged: (index) {
+                                  if (index != null) {
+                                    HapticFeedback.selectionClick();
+                                    setState(() {
+                                      _selectedPoint =
+                                          _shotGroups[_currentGroupIndex]
+                                              [index];
+                                    });
+                                  }
+                                },
                               ),
                             ),
-                            onChanged: (index) {
-                              if (index != null) {
-                                HapticFeedback
-                                    .selectionClick(); // Add tactile feedback
-                                setState(() {
-                                  _selectedPoint =
-                                      _shotGroups[_currentGroupIndex][index];
-                                });
-                              }
-                            },
-                          ),
-                          if (_selectedPoint != null) ...[
-                            const SizedBox(width: 8),
-                            IconButton(
-                              icon: const Icon(Icons.delete),
-                              onPressed: () {
-                                HapticFeedback
-                                    .mediumImpact(); // Stronger feedback for deletion
-                                _deleteSelectedPoint();
-                              },
-                              color: Colors.red,
-                              tooltip: 'Smazat bod',
-                            ),
+                            if (_selectedPoint != null) ...[
+                              const SizedBox(width: 8),
+                              InkWell(
+                                onTap: () {
+                                  HapticFeedback.mediumImpact();
+                                  _deleteSelectedPoint();
+                                },
+                                child: Column(
+                                  children: [
+                                    Icon(Icons.delete,
+                                        color: Colors.red, size: 24),
+                                    const Text('Smazat',
+                                        style: TextStyle(
+                                            fontSize: 11, color: Colors.red)),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ],
                   ],
@@ -1117,120 +1587,6 @@ class _MoaMeasurementScreenState extends State<MoaMeasurementScreen> {
                   ),
                 ],
               ),
-            ),
-          ),
-
-          // Calibration instructions
-          if (_currentMode == EditMode.calibration)
-            Positioned(
-              top: 120,
-              left: 16,
-              right: 16,
-              child: Card(
-                color: Colors.white.withOpacity(0.9),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.straighten, size: 20),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Kalibrace měření',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: calibrationController,
-                        decoration: const InputDecoration(
-                          labelText: 'Zadejte referenční vzdálenost v mm',
-                          helperText:
-                              'Označte 2 body na terči (např. 1 inch = 25.4 mm)',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                          contentPadding:
-                              EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                        ),
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) =>
-                            _updateMoaCalculation(distanceController.text),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-          // MOA controls
-          Positioned(
-            top: 16,
-            left: 16,
-            child: _buildMoaControls(),
-          ),
-
-          // Animated distance input
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeInOut,
-            bottom: _showDistanceInput ? 16 : -80,
-            left: 16,
-            right: 80, // Leave space for FAB
-            child: Card(
-              color: Colors.white.withOpacity(0.9),
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: distanceController,
-                        decoration: const InputDecoration(
-                          labelText: 'Vzdálenost k terči (m)',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                        keyboardType: TextInputType.number,
-                        onChanged: _updateMoaCalculation,
-                        onSubmitted: (_) {
-                          if (distanceController.text.isNotEmpty) {
-                            setState(() => _showDistanceInput = false);
-                          }
-                        },
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.check),
-                      onPressed: () {
-                        if (distanceController.text.isNotEmpty) {
-                          setState(() => _showDistanceInput = false);
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // FAB for showing distance input
-          Positioned(
-            bottom:
-                _showDistanceInput ? 24 : 16, // Move up when input is visible
-            right: 16,
-            child: FloatingActionButton(
-              mini: true,
-              onPressed: () =>
-                  setState(() => _showDistanceInput = !_showDistanceInput),
-              child: Icon(_showDistanceInput ? Icons.close : Icons.straighten),
-              tooltip: 'Vzdálenost k terči',
             ),
           ),
         ],

@@ -47,6 +47,7 @@ dependencies:
   cross_file: ^0.3.4+2
   image_picker: ^1.1.2
   dio: ^5.7.0
+  flutter_speed_dial: ^7.0.0
 
 dev_dependencies:
   flutter_test:

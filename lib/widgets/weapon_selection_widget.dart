@@ -5,7 +5,7 @@ import 'package:shooting_companion/helpers/database_helper.dart';
 
 class WeaponSelectionWidget extends StatefulWidget {
   final String? caliberId; // Changed from cartridgeId
-  final Function(String) onWeaponSelected;
+  final Function(String id, String name) onWeaponSelected;
 
   const WeaponSelectionWidget({
     Key? key,
@@ -89,9 +89,13 @@ class _WeaponSelectionWidgetState extends State<WeaponSelectionWidget> {
         );
       }).toList(),
       onChanged: (value) {
-        setState(() => selectedWeaponId = value);
         if (value != null) {
-          widget.onWeaponSelected(value);
+          final weapon = weapons.firstWhere((w) => w['id'].toString() == value);
+          setState(() => selectedWeaponId = value);
+          widget.onWeaponSelected(
+            value,
+            weapon['name'].toString(),
+          );
         }
       },
     );

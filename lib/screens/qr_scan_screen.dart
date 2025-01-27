@@ -16,6 +16,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
   QRViewController? controller;
   bool isProcessing = false;
+  bool isFlashOn = false;
 
   @override
   void initState() {
@@ -35,6 +36,18 @@ class _QRScanScreenState extends State<QRScanScreen> {
     }
   }
 
+  void _toggleFlash() async {
+    try {
+      await controller?.toggleFlash();
+      setState(() {
+        isFlashOn = !isFlashOn;
+      });
+    } catch (e) {
+      print('Error toggling flash: $e');
+    }
+  }
+
+  @override
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -48,13 +61,30 @@ class _QRScanScreenState extends State<QRScanScreen> {
             child: QRView(
               key: qrKey,
               onQRViewCreated: _onQRViewCreated,
+              overlay: QrScannerOverlayShape(
+                // Přidán overlay
+                borderColor: Colors.blue,
+                borderRadius: 10,
+                borderLength: 30,
+                borderWidth: 10,
+                cutOutSize: 250,
+              ),
             ),
           ),
           Expanded(
             flex: 1,
-            child: Center(
-              child:
-                  Text(isProcessing ? 'Zpracovává se...' : 'Naskenujte QR kód'),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Text(isProcessing ? 'Zpracovává se...' : 'Naskenujte QR kód'),
+                const SizedBox(height: 8),
+                Text('Svítilna je ${isFlashOn ? "zapnutá" : "vypnutá"}'),
+                ElevatedButton(
+                  onPressed: _toggleFlash,
+                  child:
+                      Text(isFlashOn ? 'Vypnout svítilnu' : 'Zapnout svítilnu'),
+                ),
+              ],
             ),
           )
         ],
